@@ -232,44 +232,35 @@ extension ICCTransport: ICCameraDeviceDelegate {
 /// Serializes async operations (PTP allows one in-flight transaction).
 /// Shared by both transports (USB and PTP/IP), hence not file-private.
 ///
-/// This is a real mutex, not just "only one call to `run` starts at a time" —
-/// Swift actors are reentrant across `await` suspension points, so a naive
-/// `actor { func run(_ op) { await op() } }` lets a second caller's operation
-/// begin executing while the first is mid-await, which for a shared TCP
-/// socket means their reads/writes interleave and corrupt packet framing
-/// (a real bug found wiring up PTPIPTransport: the background GetEvent
-/// poller raced a property-set call on the same connection). Holding the
-/// lock across the whole operation, not just its synchronous prefix, is
-/// the point of this queue.
+/// Hardware proof this needs to be airtight: with an earlier acquire/release
+/// version of this gate (isLocked flag + a waiter queue, both actor-isolated),
+/// real traffic still showed two different PTP transactions' packets
+/// interleaved mid-read on the same TCP connection — e.g. transaction 8's
+/// Start Data Packet immediately followed by transaction 9's Data Packet,
+/// each tagged at the point of origin, so it wasn't a logging artifact.
+/// The likely cause: once `operation()` suspends on a *different* actor
+/// (PTPIPTransport, for the actual socket I/O), the gate's own actor
+/// executor is free again — an isLocked check doesn't stop a *new* call to
+/// `run` from being serviced by that free executor, because the flag lives
+/// in the same isolation domain the runtime is happy to re-enter.
+///
+/// This version doesn't depend on any of that: each call explicitly chains
+/// onto a `Task` handle for the previous call and awaits its completion via
+/// `.value` before running its own operation. A `Task.value` await is
+/// documented to only resume once that exact task's body has finished, full
+/// stop — there's no isolation-domain subtlety left to get wrong.
 actor SerialGate {
-    private var isLocked = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var tail: Task<Void, Never> = Task {}
 
-    private func acquire() async {
-        if !isLocked {
-            isLocked = true
-            return
+    func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previousTail = tail
+        let resultTask = Task<T, Error> {
+            _ = await previousTail.value
+            return try await operation()
         }
-        await withCheckedContinuation { waiters.append($0) }
-    }
-
-    private func release() {
-        if waiters.isEmpty {
-            isLocked = false
-        } else {
-            waiters.removeFirst().resume()
+        tail = Task {
+            _ = try? await resultTask.value
         }
-    }
-
-    func run<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
-        await acquire()
-        do {
-            let result = try await operation()
-            release()
-            return result
-        } catch {
-            release()
-            throw error
-        }
+        return try await resultTask.value
     }
 }
