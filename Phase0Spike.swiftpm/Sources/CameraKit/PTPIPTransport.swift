@@ -23,6 +23,16 @@ public actor PTPIPTransport: PTPTransport {
     private let port: UInt16
     private let friendlyName: String
 
+    /// Fixed, not random: Canon's pairing model remembers a connecting
+    /// client by this GUID (Bluetooth-like trust), so it must be identical
+    /// across every connection attempt from this app, not regenerated per
+    /// launch — a random GUID looks like a different, unrecognized device
+    /// every time and gets an Init Fail.
+    private static let clientGUID: [UInt8] = [
+        0x50, 0x68, 0x6F, 0x74, 0x6F, 0x62, 0x6F, 0x6F,
+        0x74, 0x68, 0x53, 0x70, 0x69, 0x6B, 0x65, 0x00
+    ]
+
     private var commandConnection: NWConnection?
     private var eventConnection: NWConnection?
     private var transactionID: UInt32 = 0
@@ -52,9 +62,8 @@ public actor PTPIPTransport: PTPTransport {
         let command = try await openConnection()
         commandConnection = command
 
-        let guid = (0..<16).map { _ in UInt8.random(in: 0...255) } // any 16 bytes; camera doesn't validate ours
         let initReq = PTPIPPacket(type: .initCommandRequest,
-                                  payload: PTPIPCodec.initCommandRequestPayload(guid: guid, friendlyName: friendlyName))
+                                  payload: PTPIPCodec.initCommandRequestPayload(guid: Self.clientGUID, friendlyName: friendlyName))
         try await write(initReq.encoded(), on: command)
 
         let ackPacket = try await readPacket(on: command)
