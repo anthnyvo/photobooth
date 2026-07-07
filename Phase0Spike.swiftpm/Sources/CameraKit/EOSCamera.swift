@@ -133,9 +133,17 @@ public actor EOSCamera {
             while !Task.isCancelled {
                 guard let self else { break }
                 do {
+                    // Explicit non-nil (empty) outData: iOS's ImageCaptureCore
+                    // completion collapses everything into one Data value —
+                    // testing whether nil vs. empty-but-present signals
+                    // "expect an inbound data phase" differently, since every
+                    // poll so far has returned exactly a 12-byte response
+                    // with zero payload regardless of Canon-side property or
+                    // timing changes.
                     let result = try await self.transport.send(
                         code: CanonOp.getViewFinderData,
-                        parameters: [0x0020_0000, 0, 0])
+                        parameters: [0x0020_0000, 0, 0],
+                        outData: Data())
                     switch LiveViewParser.extractJPEG(result.payload) {
                     case .frame(let jpeg, let structured):
                         continuation.yield(jpeg)
