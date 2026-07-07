@@ -49,10 +49,13 @@ Playgrounds-built apps run with a limited entitlement set. ImageCaptureCore exte
 access from a Playgrounds app is **unverified** — it is itself a Phase 0 finding. Symptom
 if blocked: camera never appears (no `camera found` log) or no permission prompt.
 
-**Fallback (still $0, no Mac):** GitHub Actions macOS runner builds the app
-(`xcodebuild` opens `.swiftpm` projects directly) into an unsigned `.ipa`;
-**AltServer for Windows** signs it with a free Apple ID and sideloads to the iPad over
-USB (7-day resign cycle). Workflow file gets written if and when the Playgrounds path fails.
+**Fallback (still $0, no Mac):** `.github/workflows/build-ipa.yml` — manual-trigger
+GitHub Actions job on a free macOS runner, produces an unsigned `.ipa` artifact.
+To use: repo → Actions tab → "Build unsigned IPA" → Run workflow → download artifact →
+sideload with **AltServer for Windows** (signs with a free Apple ID over USB; 7-day
+resign cycle, AltStore on the iPad can auto-refresh). AltServer needs Apple's own
+iTunes + iCloud installers on the PC, not the Microsoft Store versions.
+Manual-trigger only: macOS minutes are 10x on private repos (~200 free/month ≈ 20 builds).
 
 ## Camera settings for the spike
 
