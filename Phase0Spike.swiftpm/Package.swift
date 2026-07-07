@@ -8,7 +8,7 @@ import AppleProductTypes
 let package = Package(
     name: "Phase0Spike",
     platforms: [
-        .iOS("16.0")
+        .iOS("17.0")
     ],
     products: [
         .iOSApplication(

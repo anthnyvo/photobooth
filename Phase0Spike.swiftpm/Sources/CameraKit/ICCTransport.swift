@@ -90,7 +90,7 @@ public final class ICCTransport: NSObject, @unchecked Sendable {
                         continuation.resume(throwing: TransportError.sendFailed(underlying: error))
                         return
                     }
-                    let blob = inData ?? Data()
+                    let blob = inData
                     let (payload, response) = PTPContainer.splitInboundBlob(blob)
                     continuation.resume(returning: PTPTransactionResult(
                         payload: payload, response: response, rawInbound: blob))
@@ -178,8 +178,9 @@ extension ICCTransport: ICCameraDeviceDelegate {
 
     public func deviceDidBecomeReady(withCompleteContentCatalog device: ICCameraDevice) {
         isReady = true
-        // Ask iPadOS to allow tethered capture before any vendor commands.
-        device.requestEnableTethering()
+        // Note: requestEnableTethering() is macOS-only (compiler-confirmed
+        // unavailable on iOS). On iPadOS the PTP passthrough itself is the
+        // whole tethering surface — nothing to enable first.
         emit(.ready)
     }
 
