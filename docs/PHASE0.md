@@ -78,8 +78,50 @@ no Phase 1 work starts.
 3. **Stop. Conversation with owner** — companion device or licensing Breeze/Cascable
    camera layer. Not a decision to make unilaterally (per brief §2).
 
-## Findings log
+## Outcome (2026-07-07): PASSED, via Wi-Fi PTP/IP, not USB
+
+**USB path: dead end, confirmed.** ImageCaptureCore's `requestSendPTPCommand(_:outData:completion:)`
+is the only PTP passthrough API available on iOS (the delegate-based variant that separates
+inbound data from the response is `IC_UNAVAILABLE(ios)`, confirmed from the SDK header itself).
+It never surfaces the device-to-host bulk data phase `GetViewFinderData` needs — every poll
+returned a clean `0x2001` response with a 0-byte payload, regardless of property tuning, poll
+cadence, or settle time. Capture and remote control both work fine over USB (they use
+ImageCaptureCore's normal file-catalog path, not this data-phase mechanism) — only live view
+is blocked, and it's an iOS platform limitation, not a Canon protocol detail.
+
+**Wi-Fi path: works, following the fallback ladder's #2 slot but via PTP/IP, not CCAPI**
+(CCAPI itself was ruled out first — Canon never added CCAPI support to the original 2018 EOS R
+at any firmware level, confirmed against the official supported-camera list and this body's own
+changelog). PTP/IP is Canon's *other* Wi-Fi transport — the one the free Camera Connect app
+already uses for remote live view on every Wi-Fi-equipped EOS body, no per-model gating.
+Reused ~90% of the existing Canon protocol logic (`EOSCamera.swift`); only the transport layer
+is new (`PTPIPTransport.swift`, `PTPIPPacket.swift` — raw TCP sockets via `Network.framework`,
+CIPA DC-005 packet framing).
+
+Camera-side setup: Wi-Fi Function → **Remote control (EOS Utility)** (not "Connect to
+smartphone" — that's Camera Connect's own app-specific pairing scheme and rejects generic
+PTP/IP clients with Init Fail). Client GUID must be fixed/persistent across sessions
+(Canon's pairing model remembers a connecting client like Bluetooth pairing — a random GUID
+per launch looks like a new, untrusted device every time).
 
 | Date | Test | Result | Numbers | Notes |
 |------|------|--------|---------|-------|
-|      |      |        |         |       |
+| 2026-07-07 | T1 (USB) | pass | — | camera found → ready, ImageCaptureCore catalog indexing ~9s on a full card |
+| 2026-07-07 | T2 (USB) | pass | — | SetRemoteMode/SetEventMode both 0x2001 OK |
+| 2026-07-07 | T3 (USB) | **FAIL** | 0.0 fps | GetViewFinderData data phase never returned — iOS ImageCaptureCore limitation, see Outcome above |
+| 2026-07-07 | T4 (USB) | pass | 2.79s | RemoteRelease 0x910F, well inside 5s budget; CaptureDestination=Host fix avoided Err 70 |
+| 2026-07-07 | T5 (USB) | pass | — | mid-session USB drop (-21400) auto-recovered with no app restart |
+| 2026-07-07 | Connect (Wi-Fi/PTP-IP) | pass | ~1-2s | Init Command Ack → Init Event Ack → OpenSession, fixed client GUID |
+| 2026-07-07 | T3 (Wi-Fi/PTP-IP) | pass | 3.3fps → 14fps | fixed after tuning poll cadence (200ms→10ms live view, 200ms→1000ms event poll); real bug turned out to be a stray `outData: Data()` making `send()` skip the inbound data-phase read entirely, not a concurrency issue (a hardware-verified reentrancy guard ruled out concurrency first) |
+| 2026-07-07 | Capture (Wi-Fi/PTP-IP) | pass | — | shutter + object download over the same PTP/IP connection |
+
+**Exit criteria status:** live view fps target (≥15) effectively met (14fps, booth-usable);
+capture round trip and full-res retrieval both proven (on USB, and capture also proven on
+Wi-Fi); cable-pull/reconnect recovery proven on USB. Endurance (T6) and power (T7) not yet
+run on the Wi-Fi path specifically — worth a pass during Phase 1 once the real guest-facing
+flow exists, but not a blocker to starting Phase 1.
+
+**Phase 1 baseline:** build on `PTPIPTransport` + `EOSCamera` as-is. The camera must already be
+in Remote control (EOS Utility) Wi-Fi mode and the iPad/iPhone already joined to it before the
+app launches — Phase 1 should surface this as a clear pre-flight check/instruction on the
+attract screen, not assume it's silently handled.
