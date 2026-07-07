@@ -190,6 +190,12 @@ public actor PTPIPTransport: PTPTransport {
             let txn = await self.nextTransactionID()
             let hasDataPhase = Self.dataPhaseOpcodes.contains(code)
             let context = String(format: "opcode=0x%04X txn=%d", code, txn)
+            // GetEvent and GetViewFinderData poll continuously (10ms/150ms
+            // cadence) and drown a capped diagnostics log buffer in wire
+            // noise within seconds — real evidence (e.g. the shutter
+            // command's own response) scrolls out before anyone can read it.
+            // Every other opcode is rare enough to log in full.
+            let verbose = code != CanonOp.getViewFinderData && code != CanonOp.getEvent
 
             try await self.enterExclusive(context)
             do {
@@ -206,7 +212,7 @@ public actor PTPIPTransport: PTPTransport {
 
                 var inboundPayload = Data()
                 if outData == nil && hasDataPhase {
-                    inboundPayload = try await self.readDataPhase(on: command, context: context)
+                    inboundPayload = try await self.readDataPhase(on: command, context: context, verbose: verbose)
                 }
 
                 let responsePacket = try await self.readPacket(on: command, context: context)
@@ -218,6 +224,9 @@ public actor PTPIPTransport: PTPTransport {
                 }
                 let response = PTPContainer(kind: .response, code: parsed.code,
                                             transactionID: parsed.transactionID, parameters: parsed.parameters)
+                if verbose {
+                    log("[\(context)] response: \(response.code == PTPResponseCode.ok ? "OK" : String(format: "0x%04X", response.code))")
+                }
                 await self.exitExclusive()
                 return PTPTransactionResult(payload: inboundPayload, response: response, rawInbound: inboundPayload)
             } catch {
@@ -250,7 +259,7 @@ public actor PTPIPTransport: PTPTransport {
     /// somewhere — using the length this camera already tells us up front
     /// is a stronger, independently-checkable signal than guessing its
     /// exact type-sequence convention.
-    private func readDataPhase(on connection: NWConnection, context: String) async throws -> Data {
+    private func readDataPhase(on connection: NWConnection, context: String, verbose: Bool) async throws -> Data {
         let start = try await readPacket(on: connection, context: context)
         guard start.type == .startDataPacket else {
             throw PTPIPError.unexpectedPacketType(start.type.rawValue)
@@ -259,7 +268,7 @@ public actor PTPIPTransport: PTPTransport {
             throw PTPIPError.malformedPacket("Start Data Packet payload too short for declared length")
         }
         let totalLength = Int(start.payload.readLE(UInt64.self, at: 4))
-        log("[\(context)] data phase declared length: \(totalLength) bytes")
+        if verbose { log("[\(context)] data phase declared length: \(totalLength) bytes") }
 
         var collected = Data()
         collected.reserveCapacity(totalLength)
@@ -380,7 +389,6 @@ public actor PTPIPTransport: PTPTransport {
         }
         guard length >= 8 else { throw PTPIPError.malformedPacket("packet length \(length) < header size") }
         let payload = length > 8 ? try await readExactly(length - 8, on: connection) : Data()
-        log("[\(context)] packet read: \(type) (\(payload.count) byte payload)")
         return PTPIPPacket(type: type, payload: payload)
     }
 
