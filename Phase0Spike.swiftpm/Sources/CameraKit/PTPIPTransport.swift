@@ -275,11 +275,15 @@ public actor PTPIPTransport: PTPTransport {
     private func readPacket(on connection: NWConnection) async throws -> PTPIPPacket {
         let header = try await readExactly(8, on: connection)
         let length = Int(header.readLE(UInt32.self, at: 0))
-        guard let type = PTPIPPacketType(rawValue: header.readLE(UInt32.self, at: 4)) else {
+        let rawType = header.readLE(UInt32.self, at: 4)
+        guard let type = PTPIPPacketType(rawValue: rawType) else {
+            let prefix = header.map { String(format: "%02X", $0) }.joined(separator: " ")
+            log("!! unknown packet type \(rawType) (0x\(String(rawType, radix: 16))), length field \(length), header bytes [\(prefix)]")
             throw PTPIPError.malformedPacket("unknown packet type in header")
         }
         guard length >= 8 else { throw PTPIPError.malformedPacket("packet length \(length) < header size") }
         let payload = length > 8 ? try await readExactly(length - 8, on: connection) : Data()
+        log("packet read: \(type) (\(payload.count) byte payload)")
         return PTPIPPacket(type: type, payload: payload)
     }
 
