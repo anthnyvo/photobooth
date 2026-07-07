@@ -138,6 +138,10 @@ public actor EOSCamera {
             var lastDiagLog = ContinuousClock.now.advanced(by: .seconds(-10))
             while !Task.isCancelled {
                 guard let self else { break }
+                if await self.isCapturePaused {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    continue
+                }
                 do {
                     let result = try await self.transport.send(
                         code: CanonOp.getViewFinderData,
@@ -204,15 +208,28 @@ public actor EOSCamera {
 
     // MARK: - Capture
 
+    /// Set while a capture is in flight — the live view loop checks this and
+    /// skips its own polling entirely rather than racing the shutter/download
+    /// calls for turns on the shared connection. Found on hardware: live
+    /// view's continuous ~10ms-cadence loop was starving the shutter command
+    /// out of ever running at all (0x910F never even appeared on the wire
+    /// during a 15s capture timeout) — cancelling the *event* poller alone
+    /// wasn't enough, since live view is the far busier of the two.
+    private(set) var isCapturePaused = false
+
     /// Trigger the shutter and return the resulting full-resolution image.
     public func capturePhoto() async throws -> Data {
-        // Pause the background GetEvent poller for the capture window: over
-        // PTP/IP, nextCapturedFile does its own GetEvent polling to find the
-        // ObjectAdded event, and two concurrent pollers would race for the
-        // same event queue. Harmless for USB, whose nextCapturedFile doesn't
-        // touch GetEvent at all (ImageCaptureCore announces files on its own).
+        // Pause both background pollers for the capture window: over
+        // PTP/IP, nextCapturedFile listens on the dedicated event channel
+        // and triggerShutter/download need clear turns on the command
+        // connection. Harmless for USB, whose nextCapturedFile doesn't
+        // touch either at all (ImageCaptureCore announces files on its own).
         eventLoopTask?.cancel()
-        defer { startEventLoop() }
+        isCapturePaused = true
+        defer {
+            isCapturePaused = false
+            startEventLoop()
+        }
         try await triggerShutter()
         return try await transport.nextCapturedFile(timeout: 15)
     }
