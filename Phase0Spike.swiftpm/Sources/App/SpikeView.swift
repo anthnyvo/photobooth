@@ -14,6 +14,10 @@ struct SpikeView: View {
             VStack(spacing: 12) {
                 statusBanner
 
+                if model.step == .choosingConnection {
+                    connectionPicker
+                }
+
                 ZStack {
                     Rectangle().fill(.black)
                     if let frame = model.liveViewImage {
@@ -109,7 +113,39 @@ struct SpikeView: View {
                    maxHeight: sizeClass == .compact ? 260 : .infinity)
             .background(Color(.secondarySystemBackground))
         }
-        .onAppear { model.start() }
+    }
+
+    private var connectionPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: model.startUSB) {
+                Label("Connect via USB", systemImage: "cable.connector")
+                    .frame(maxWidth: .infinity)
+                    .padding()
+            }
+            .buttonStyle(.borderedProminent)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Or via Wi-Fi — join the camera's Wi-Fi network first, then enter its IP:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    TextField("Camera IP", text: $model.cameraIPText)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numbersAndPunctuation)
+                        .autocorrectionDisabled()
+                        #if os(iOS)
+                        .textInputAutocapitalization(.never)
+                        #endif
+                    Button(action: model.startWiFi) {
+                        Label("Connect via Wi-Fi", systemImage: "wifi")
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private var statusBanner: some View {
@@ -125,7 +161,7 @@ struct SpikeView: View {
     private var bannerColor: Color {
         switch model.step {
         case .liveView: return .green
-        case .disconnected: return .red
+        case .disconnected, .failed: return .red
         case .ready, .remoteMode: return .blue
         default: return .orange
         }

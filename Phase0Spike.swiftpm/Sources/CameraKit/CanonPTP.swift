@@ -27,6 +27,14 @@ public enum CanonOp {
     public static let transferComplete: UInt16 = 0x9117
 }
 
+/// Standard (vendor-neutral) PTP opcodes needed for object download over
+/// PTP/IP — USB capture retrieval goes through ImageCaptureCore's own file
+/// APIs instead, so these were never needed there.
+public enum StandardPTPOp {
+    public static let getObjectInfo: UInt16 = 0x1008
+    public static let getObject: UInt16 = 0x1009
+}
+
 public enum CanonProp {
     public static let evfOutputDevice: UInt32 = 0xD1B0  // 0 = none, 1 = camera TFT, 2 = PC
     public static let evfMode: UInt32 = 0xD1B3          // 1 = enable EVF

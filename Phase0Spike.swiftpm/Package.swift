@@ -30,7 +30,11 @@ let package = Package(
                 .portrait
             ],
             capabilities: [
-                .camera(purposeString: "Connects to the Canon EOS R over USB to run the photobooth.")
+                .camera(purposeString: "Connects to the Canon EOS R over USB to run the photobooth."),
+                .localNetwork(
+                    purposeString: "Connects to the Canon EOS R over Wi-Fi to run the photobooth.",
+                    bonjourServiceTypes: []
+                )
             ]
         )
     ],

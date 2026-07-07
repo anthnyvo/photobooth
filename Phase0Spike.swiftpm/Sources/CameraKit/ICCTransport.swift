@@ -31,9 +31,11 @@ public enum TransportError: Error {
 }
 
 /// Wraps ICDeviceBrowser/ICCameraDevice. Sole ImageCaptureCore touchpoint in
-/// the codebase — if Phase 0 forces a fallback to Canon CCAPI over Wi-Fi,
-/// this is the class that gets a sibling, and nothing above it changes.
-public final class ICCTransport: NSObject, @unchecked Sendable {
+/// the codebase. USB live view's data phase turned out not to be retrievable
+/// through this API on iOS (Phase 0 finding) — PTPIPTransport is the Wi-Fi
+/// sibling that exists because of that, conforming to the same PTPTransport
+/// protocol so EOSCamera's logic is unchanged either way.
+public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
 
     private let browser = ICDeviceBrowser()
     private var camera: ICCameraDevice?
@@ -228,7 +230,8 @@ extension ICCTransport: ICCameraDeviceDelegate {
 }
 
 /// Serializes async operations (PTP allows one in-flight transaction).
-private actor SerialGate {
+/// Shared by both transports (USB and PTP/IP), hence not file-private.
+actor SerialGate {
     func run<T: Sendable>(_ operation: @Sendable () async throws -> T) async rethrows -> T {
         try await operation()
     }

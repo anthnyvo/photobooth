@@ -29,7 +29,7 @@ public actor EOSCamera {
         case idle, connecting, connected, liveView, failed(String)
     }
 
-    private let transport: ICCTransport
+    private let transport: any PTPTransport
     public private(set) var state: State = .idle
     private var eventLoopTask: Task<Void, Never>?
     private var liveViewTask: Task<Void, Never>?
@@ -38,7 +38,7 @@ public actor EOSCamera {
     /// Diagnostic log lines, mirrored to the spike UI.
     private var logSink: (@Sendable (String) -> Void)?
 
-    public init(transport: ICCTransport) {
+    public init(transport: any PTPTransport) {
         self.transport = transport
     }
 
@@ -206,8 +206,14 @@ public actor EOSCamera {
 
     /// Trigger the shutter and return the resulting full-resolution image.
     public func capturePhoto() async throws -> Data {
+        // Pause the background GetEvent poller for the capture window: over
+        // PTP/IP, nextCapturedFile does its own GetEvent polling to find the
+        // ObjectAdded event, and two concurrent pollers would race for the
+        // same event queue. Harmless for USB, whose nextCapturedFile doesn't
+        // touch GetEvent at all (ImageCaptureCore announces files on its own).
+        eventLoopTask?.cancel()
+        defer { startEventLoop() }
         try await triggerShutter()
-        // ImageCaptureCore announces the new object on the card; download it.
         return try await transport.nextCapturedFile(timeout: 15)
     }
 

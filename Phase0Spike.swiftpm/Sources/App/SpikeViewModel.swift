@@ -2,54 +2,86 @@ import Foundation
 import SwiftUI
 
 /// Drives the Phase 0 spike screen. One state machine, heavy logging —
-/// the whole point is to learn what the EOS R actually does over
-/// ImageCaptureCore passthrough.
+/// the whole point is to learn what the EOS R actually does over whichever
+/// transport is under test.
 @MainActor
 final class SpikeViewModel: ObservableObject {
 
     enum Step: String {
-        case waitingForCamera = "Plug in the EOS R (powered on, Auto/PTP USB mode)"
+        case choosingConnection = "Choose USB or Wi-Fi to begin"
+        case waitingForCamera = "Waiting for camera…"
         case sessionOpening = "Camera found — opening session…"
         case indexing = "Session open — waiting for content catalog (this gates PTP access)"
         case ready = "READY — PTP passthrough authorized"
         case remoteMode = "Remote mode active"
         case liveView = "LIVE VIEW streaming"
         case disconnected = "Camera disconnected — replug to test recovery"
+        case failed = "Connection failed — see log"
     }
 
-    @Published var step: Step = .waitingForCamera
+    @Published var step: Step = .choosingConnection
     @Published var logLines: [String] = []
     @Published var liveViewImage: UIImage?
     @Published var lastCapture: UIImage?
     @Published var fps: Double = 0
     @Published var captureRoundTripSeconds: Double?
     @Published var isCapturing = false
+    @Published var cameraIPText: String = "192.168.1.1"
 
-    private let transport = ICCTransport()
-    private lazy var camera = EOSCamera(transport: transport)
+    private var transport: (any PTPTransport)?
+    private var camera: EOSCamera?
     private var liveViewConsumer: Task<Void, Never>?
+    private var eventConsumer: Task<Void, Never>?
     private var fpsTimer: Timer?
 
-    func start() {
-        log("spike started — \(Date().formatted())")
-        Task {
-            await camera.setLogSink { [weak self] line in
-                Task { @MainActor in self?.log(line) }
-            }
-        }
-        Task { await consumeTransportEvents() }
-        transport.start()
+    // MARK: - Connection entry points
 
-        fpsTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.fps = await self.camera.liveViewStats.fps
+    func startUSB() {
+        log("spike started (USB) — \(Date().formatted())")
+        step = .waitingForCamera
+        let usbTransport = ICCTransport()
+        wireUp(transport: usbTransport)
+        usbTransport.start()
+    }
+
+    func startWiFi() {
+        log("spike started (Wi-Fi) — \(Date().formatted()), target \(cameraIPText)")
+        step = .waitingForCamera
+        let wifiTransport = PTPIPTransport(host: cameraIPText)
+        wireUp(transport: wifiTransport)
+        Task {
+            do {
+                try await wifiTransport.connect()
+            } catch {
+                log("!! Wi-Fi connect failed: \(error)")
+                step = .failed
             }
         }
     }
 
-    private func consumeTransportEvents() async {
-        for await event in transport.events {
+    private func wireUp(transport: any PTPTransport) {
+        self.transport = transport
+        let cam = EOSCamera(transport: transport)
+        self.camera = cam
+        Task {
+            await cam.setLogSink { [weak self] line in
+                Task { @MainActor in self?.log(line) }
+            }
+        }
+        eventConsumer?.cancel()
+        eventConsumer = Task { await self.consumeTransportEvents(transport.events) }
+
+        fpsTimer?.invalidate()
+        fpsTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let cam = self.camera else { return }
+                self.fps = await cam.liveViewStats.fps
+            }
+        }
+    }
+
+    private func consumeTransportEvents(_ events: AsyncStream<TransportEvent>) async {
+        for await event in events {
             switch event {
             case .deviceFound(let name):
                 log("camera found: \(name)")
@@ -58,15 +90,15 @@ final class SpikeViewModel: ObservableObject {
                 log("session opened — waiting for deviceDidBecomeReady (do NOT send PTP yet)")
                 step = .indexing
             case .ready:
-                log("deviceDidBecomeReady fired — passthrough authorized")
+                log("ready — passthrough authorized")
                 step = .ready
                 await autoConnect()
             case .deviceRemoved:
-                log("!! camera removed — recovery test: replug the cable")
+                log("!! camera removed — recovery test: replug/reconnect")
                 step = .disconnected
                 liveViewConsumer?.cancel()
                 liveViewImage = nil
-                await camera.disconnect()
+                await camera?.disconnect()
             case .fileAdded(let name, let size):
                 log("file announced: \(name) (\(size) bytes)")
             case .log(let line):
@@ -78,6 +110,7 @@ final class SpikeViewModel: ObservableObject {
     /// The Phase 0 happy path, run automatically on ready:
     /// remote mode -> live view. Capture stays manual (button).
     private func autoConnect() async {
+        guard let camera else { return }
         do {
             try await camera.enterRemoteMode()
             step = .remoteMode
@@ -88,6 +121,7 @@ final class SpikeViewModel: ObservableObject {
     }
 
     func startLiveView() async throws {
+        guard let camera else { return }
         let frames = try await camera.startLiveView()
         step = .liveView
         liveViewConsumer?.cancel()
@@ -102,7 +136,7 @@ final class SpikeViewModel: ObservableObject {
     }
 
     func capture() {
-        guard !isCapturing else { return }
+        guard !isCapturing, let camera else { return }
         isCapturing = true
         let started = ContinuousClock.now
         Task {
