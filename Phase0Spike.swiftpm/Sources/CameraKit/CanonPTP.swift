@@ -31,6 +31,12 @@ public enum CanonProp {
     public static let evfOutputDevice: UInt32 = 0xD1B0  // 0 = none, 1 = camera TFT, 2 = PC
     public static let evfMode: UInt32 = 0xD1B3          // 1 = enable EVF
     public static let captureDestination: UInt32 = 0xD11C
+    /// Route captures to the host instead of the memory card. Per libgphoto2
+    /// (ptp.h: PTP_CANON_EOS_CAPTUREDEST_HD). Skipping this is a documented
+    /// cause of capture-time errors (Err 70 et al.) on EOS bodies during
+    /// third-party tethering — the camera also tries to write the card mid-
+    /// capture, and any card hiccup surfaces as a body-halting error.
+    public static let captureDestinationHost: UInt32 = 4
     public static let iso: UInt32 = 0xD103
     public static let whiteBalance: UInt32 = 0xD109
     public static let exposureCompensation: UInt32 = 0xD104

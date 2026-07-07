@@ -59,6 +59,16 @@ public actor EOSCamera {
             try await expectOK("SetEventMode",
                 await transport.send(code: CanonOp.setEventMode, parameters: [1]))
             startEventLoop()
+            // Route captures to the host, not the card — see CanonProp doc
+            // comment. Non-fatal if the body rejects it (older bodies may
+            // not expose this property); log and continue either way.
+            do {
+                try await setProperty(CanonProp.captureDestination,
+                                      CanonProp.captureDestinationHost,
+                                      name: "CaptureDestination=Host")
+            } catch {
+                log("CaptureDestination=Host rejected (\(error)) — continuing, capture may still hit the card")
+            }
             state = .connected
             log("remote mode active")
         } catch {
