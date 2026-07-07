@@ -128,41 +128,70 @@ public actor PTPIPTransport: PTPTransport {
         return transactionID
     }
 
+    // Hard reentrancy guard: three separate serialization designs (an
+    // acquire/release flag, explicit Task-chaining, a single-worker job
+    // queue) all still showed two transactions' packets interleaved on the
+    // wire under real hardware traffic, despite each looking airtight by
+    // reasoning alone. Rather than trust reasoning further, this makes a
+    // real violation impossible to miss: if a second call's network I/O
+    // ever starts before the first one's finishes, this crashes immediately
+    // with both contexts in the message, instead of silently corrupting
+    // the byte stream the way the last several attempts did.
+    private var busyContext: String?
+
     public func send(code: UInt16, parameters: [UInt32], outData: Data?) async throws -> PTPTransactionResult {
         try await sendGate.run {
             let command = try await self.requireCommandConnection()
             let txn = await self.nextTransactionID()
             let hasDataPhase = Self.dataPhaseOpcodes.contains(code)
-
-            let reqPayload = PTPIPCodec.operationRequestPayload(
-                dataPhase: hasDataPhase ? 1 : 0, opcode: code, transactionID: txn, parameters: parameters)
-            try await self.write(PTPIPPacket(type: .operationRequest, payload: reqPayload).encoded(), on: command)
-
-            if let outData, hasDataPhase {
-                try await self.write(PTPIPPacket(type: .startDataPacket,
-                    payload: PTPIPCodec.startDataPacketPayload(transactionID: txn, totalLength: UInt64(outData.count))).encoded(), on: command)
-                try await self.write(PTPIPPacket(type: .endDataPacket,
-                    payload: PTPIPCodec.dataPacketPayload(transactionID: txn, chunk: outData)).encoded(), on: command)
-            }
-
             let context = String(format: "opcode=0x%04X txn=%d", code, txn)
 
-            var inboundPayload = Data()
-            if outData == nil && hasDataPhase {
-                inboundPayload = try await self.readDataPhase(on: command, context: context)
-            }
+            try await self.enterExclusive(context)
+            do {
+                let reqPayload = PTPIPCodec.operationRequestPayload(
+                    dataPhase: hasDataPhase ? 1 : 0, opcode: code, transactionID: txn, parameters: parameters)
+                try await self.write(PTPIPPacket(type: .operationRequest, payload: reqPayload).encoded(), on: command)
 
-            let responsePacket = try await self.readPacket(on: command, context: context)
-            guard responsePacket.type == .operationResponse else {
-                throw PTPIPError.unexpectedPacketType(responsePacket.type.rawValue)
+                if let outData, hasDataPhase {
+                    try await self.write(PTPIPPacket(type: .startDataPacket,
+                        payload: PTPIPCodec.startDataPacketPayload(transactionID: txn, totalLength: UInt64(outData.count))).encoded(), on: command)
+                    try await self.write(PTPIPPacket(type: .endDataPacket,
+                        payload: PTPIPCodec.dataPacketPayload(transactionID: txn, chunk: outData)).encoded(), on: command)
+                }
+
+                var inboundPayload = Data()
+                if outData == nil && hasDataPhase {
+                    inboundPayload = try await self.readDataPhase(on: command, context: context)
+                }
+
+                let responsePacket = try await self.readPacket(on: command, context: context)
+                guard responsePacket.type == .operationResponse else {
+                    throw PTPIPError.unexpectedPacketType(responsePacket.type.rawValue)
+                }
+                guard let parsed = PTPIPCodec.parseOperationResponse(responsePacket.payload) else {
+                    throw PTPIPError.malformedPacket("Operation Response too short")
+                }
+                let response = PTPContainer(kind: .response, code: parsed.code,
+                                            transactionID: parsed.transactionID, parameters: parsed.parameters)
+                await self.exitExclusive()
+                return PTPTransactionResult(payload: inboundPayload, response: response, rawInbound: inboundPayload)
+            } catch {
+                await self.exitExclusive()
+                throw error
             }
-            guard let parsed = PTPIPCodec.parseOperationResponse(responsePacket.payload) else {
-                throw PTPIPError.malformedPacket("Operation Response too short")
-            }
-            let response = PTPContainer(kind: .response, code: parsed.code,
-                                        transactionID: parsed.transactionID, parameters: parsed.parameters)
-            return PTPTransactionResult(payload: inboundPayload, response: response, rawInbound: inboundPayload)
         }
+    }
+
+    private func enterExclusive(_ context: String) async throws {
+        if let busyContext {
+            log("!!! REENTRANCY DETECTED: '\(context)' started while '\(busyContext)' was still in flight")
+            preconditionFailure("PTPIPTransport network section entered concurrently: '\(context)' vs '\(busyContext)'")
+        }
+        busyContext = context
+    }
+
+    private func exitExclusive() {
+        busyContext = nil
     }
 
     /// Reads Start Data Packet -> zero or more Data Packets -> End Data Packet,
