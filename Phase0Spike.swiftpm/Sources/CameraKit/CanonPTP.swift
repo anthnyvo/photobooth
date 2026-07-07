@@ -65,6 +65,11 @@ public enum CanonEvent {
     public static let propValueChanged: UInt32 = 0xC189
     public static let availListChanged: UInt32 = 0xC18A
     public static let objectAddedEx64: UInt32 = 0xC1A7  // newer bodies report adds with this
+    /// Fires instead of ObjectAddedEx when CaptureDestination=Host (SDRAM):
+    /// the image was never written to the card, so the card-object-added
+    /// events never come — this is Canon's own signal that a host-destined
+    /// capture is ready to transfer.
+    public static let requestObjectTransfer: UInt32 = 0xC186
 }
 
 /// One record parsed out of a Canon GetEvent data blob.

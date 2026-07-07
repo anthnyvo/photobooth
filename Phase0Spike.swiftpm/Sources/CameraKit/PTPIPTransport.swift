@@ -281,28 +281,31 @@ public actor PTPIPTransport: PTPTransport {
 
     // MARK: - Object download (capture retrieval over Wi-Fi)
 
-    /// Waits for an ObjectAdded event on the dedicated PTP/IP event
-    /// connection, then downloads the object via standard
-    /// GetObjectInfo/GetObject. Phase 1 finding: this body delivers
-    /// ObjectAdded there, not via Canon's GetEvent command/response on the
-    /// command connection (which is what the previous version polled,
-    /// unsuccessfully, for the full timeout every time).
+    /// Polls Canon's own GetEvent for RequestObjectTransfer (0xC186) — the
+    /// signal that actually fires for CaptureDestination=Host (SDRAM)
+    /// captures. Standard PTP ObjectAdded (card-based) never arrives for a
+    /// host-only capture, on either the command connection's GetEvent or the
+    /// dedicated PTP/IP event connection — both were tried and neither ever
+    /// saw anything during a real capture. ObjectAddedEx/64 checked too, in
+    /// case a card happens to be inserted and mirrors the notification.
     public func nextCapturedFile(timeout: TimeInterval) async throws -> Data {
-        let objectHandle: UInt32? = await withTaskGroup(of: UInt32?.self) { group in
-            group.addTask { [objectAddedStream] in
-                for await handle in objectAddedStream { return handle }
-                return nil
+        let deadline = Date().addingTimeInterval(timeout)
+        var objectHandle: UInt32?
+        while Date() < deadline {
+            let result = try await send(code: CanonOp.getEvent, parameters: [], outData: nil)
+            for record in CanonEventRecord.parse(result.payload) {
+                if (record.type == CanonEvent.requestObjectTransfer
+                    || record.type == CanonEvent.objectAddedEx
+                    || record.type == CanonEvent.objectAddedEx64),
+                   record.payload.count >= 4 {
+                    objectHandle = record.payload.readLE(UInt32.self, at: 0)
+                }
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
+            if objectHandle != nil { break }
+            try? await Task.sleep(nanoseconds: 150_000_000)
         }
         guard let objectHandle else {
-            throw TransportError.timeout("no ObjectAdded event within \(timeout)s of capture")
+            throw TransportError.timeout("no RequestObjectTransfer/ObjectAdded event within \(timeout)s of capture")
         }
         log("captured object handle 0x\(String(objectHandle, radix: 16))")
 
