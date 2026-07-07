@@ -10,7 +10,9 @@ public struct LiveViewStats: Sendable {
     public var framesReceived: Int = 0
     public var emptyPolls: Int = 0
     public var fps: Double = 0
-    public var usedStructuredFraming: Bool = true
+    /// nil until the first real frame decodes — do not default this to a
+    /// value, or "no frames yet" silently reads as "structured: yes".
+    public var usedStructuredFraming: Bool?
 }
 
 /// Canon EOS remote-control state machine over any PTP transport.
@@ -116,6 +118,7 @@ public actor EOSCamera {
         liveViewTask = Task { [weak self] in
             var windowStart = ContinuousClock.now
             var windowFrames = 0
+            var lastDiagLog = ContinuousClock.now.advanced(by: .seconds(-10))
             while !Task.isCancelled {
                 guard let self else { break }
                 do {
@@ -129,6 +132,14 @@ public actor EOSCamera {
                         await self.recordFrame(structured: structured)
                     case .noFrame:
                         await self.recordEmptyPoll()
+                        // Throttled raw-payload dump — this is the actual
+                        // Phase 0 evidence needed to fix the parser.
+                        if lastDiagLog.duration(to: .now) > .seconds(2) {
+                            lastDiagLog = .now
+                            let payload = result.payload
+                            let prefix = payload.prefix(24).map { String(format: "%02X", $0) }.joined(separator: " ")
+                            await self.log("noFrame: payload \(payload.count) bytes, response code \(result.response.map { String(format: "0x%04X", $0.code) } ?? "none"), prefix [\(prefix)]")
+                        }
                         // Camera not ready yet / frame not available — back off briefly.
                         try? await Task.sleep(nanoseconds: 50_000_000)
                     }
@@ -165,8 +176,8 @@ public actor EOSCamera {
     private func recordEmptyPoll() { liveViewStats.emptyPolls += 1 }
     private func recordFPS(_ fps: Double) {
         liveViewStats.fps = fps
-        log(String(format: "live view %.1f fps (structured framing: %@)",
-                   fps, liveViewStats.usedStructuredFraming ? "yes" : "no"))
+        let framing = liveViewStats.usedStructuredFraming.map { $0 ? "yes" : "no" } ?? "no frames decoded yet"
+        log(String(format: "live view %.1f fps (structured framing: %@)", fps, framing))
     }
 
     // MARK: - Capture
