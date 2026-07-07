@@ -46,6 +46,19 @@ struct AttractView: View {
                 }
                 .padding(.bottom, 60)
             }
+
+            if let error = model.lastError {
+                VStack {
+                    Spacer()
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                        .padding(10)
+                        .background(.red.opacity(0.85))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(.bottom, 8)
+                }
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture { model.tapToStart() }
