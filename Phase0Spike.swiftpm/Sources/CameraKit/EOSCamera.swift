@@ -130,18 +130,24 @@ public actor EOSCamera {
 
         let (stream, continuation) = AsyncStream.makeStream(of: Data.self,
             bufferingPolicy: .bufferingNewest(1))
+        liveViewContinuation = continuation
+        startLiveViewPolling()
+        return stream
+    }
 
+    /// Stored so capture can fully tear down and later resume polling
+    /// against the same stream the UI already subscribed to — calling
+    /// startLiveView() again would hand back a stream nobody's listening to.
+    private var liveViewContinuation: AsyncStream<Data>.Continuation?
+
+    private func startLiveViewPolling() {
         liveViewTask?.cancel()
         liveViewTask = Task { [weak self] in
             var windowStart = ContinuousClock.now
             var windowFrames = 0
             var lastDiagLog = ContinuousClock.now.advanced(by: .seconds(-10))
             while !Task.isCancelled {
-                guard let self else { break }
-                if await self.isCapturePaused {
-                    try? await Task.sleep(nanoseconds: 50_000_000)
-                    continue
-                }
+                guard let self, let continuation = await self.liveViewContinuation else { break }
                 do {
                     let result = try await self.transport.send(
                         code: CanonOp.getViewFinderData,
@@ -183,14 +189,14 @@ public actor EOSCamera {
                     windowFrames = 0
                 }
             }
-            continuation.finish()
         }
-        return stream
     }
 
     public func stopLiveView() async throws {
         liveViewTask?.cancel()
         liveViewTask = nil
+        liveViewContinuation?.finish()
+        liveViewContinuation = nil
         try await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off")
         state = .connected
     }
@@ -208,27 +214,33 @@ public actor EOSCamera {
 
     // MARK: - Capture
 
-    /// Set while a capture is in flight — the live view loop checks this and
-    /// skips its own polling entirely rather than racing the shutter/download
-    /// calls for turns on the shared connection. Found on hardware: live
-    /// view's continuous ~10ms-cadence loop was starving the shutter command
-    /// out of ever running at all (0x910F never even appeared on the wire
-    /// during a 15s capture timeout) — cancelling the *event* poller alone
-    /// wasn't enough, since live view is the far busier of the two.
-    private(set) var isCapturePaused = false
-
     /// Trigger the shutter and return the resulting full-resolution image.
     public func capturePhoto() async throws -> Data {
-        // Pause both background pollers for the capture window: over
-        // PTP/IP, nextCapturedFile listens on the dedicated event channel
-        // and triggerShutter/download need clear turns on the command
-        // connection. Harmless for USB, whose nextCapturedFile doesn't
-        // touch either at all (ImageCaptureCore announces files on its own).
+        // Merely *pausing our own polling* (an isCapturePaused flag the loop
+        // checked) left EVFOutputDevice=3 (streaming) active on the camera
+        // itself the whole time full-press was attempted — it returned
+        // DeviceBusy (0x2019) persistently, unmoved by ~7s of retries or
+        // draining GetEvent in between. Real EOS tethering tools fully stop
+        // the EVF stream before a capture, not just stop polling it; doing
+        // the same here, then restoring it after.
         eventLoopTask?.cancel()
-        isCapturePaused = true
+        let wasStreamingLiveView = liveViewTask != nil
+        if wasStreamingLiveView {
+            liveViewTask?.cancel()
+            liveViewTask = nil
+            try? await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off (capture)")
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
         defer {
-            isCapturePaused = false
             startEventLoop()
+            if wasStreamingLiveView {
+                Task { [weak self] in
+                    guard let self else { return }
+                    try? await self.setProperty(CanonProp.evfOutputDevice, 3, name: "EVFOutputDevice=cameraAndHost (resume)")
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    await self.startLiveViewPolling()
+                }
+            }
         }
         try await triggerShutter()
         return try await transport.nextCapturedFile(timeout: 15)
