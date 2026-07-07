@@ -235,23 +235,22 @@ public actor EOSCamera {
     }
 
     private func triggerShutter() async throws {
-        // Simple release first.
-        let simple = try await transport.send(code: CanonOp.remoteRelease)
-        if simple.response?.code == PTPResponseCode.ok || simple.response == nil {
-            log("shutter via RemoteRelease 0x910F")
-            return
-        }
-        log(String(format: "0x910F returned 0x%04X, trying On/Off pair",
-                   simple.response?.code ?? 0))
-        // Newer-body sequence: half press, full press, release both.
+        // Bare 0x910F (RemoteRelease) acks OK on EOS bodies but is a no-op —
+        // it's a legacy PowerShot-era release, not implemented on EOS. That's
+        // why capture logged "shutter via RemoteRelease" yet GetEvent never
+        // produced a single record afterward: nothing was actually triggered.
+        // EOS bodies need the half-press (AF) + full-press pair instead,
+        // matching libgphoto2's ptp2 camlib and EOS Utility's own sequence.
         try await expectOK("ReleaseOn(half)",
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
+        try? await Task.sleep(nanoseconds: 300_000_000)
         try await expectOK("ReleaseOn(full)",
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0]))
         try await expectOK("ReleaseOff(full)",
             await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2]))
         try await expectOK("ReleaseOff(half)",
             await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1]))
+        log("shutter via ReleaseOn/Off half+full pair")
     }
 
     // MARK: - Properties
