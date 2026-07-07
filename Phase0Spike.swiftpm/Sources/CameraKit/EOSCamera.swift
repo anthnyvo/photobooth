@@ -245,10 +245,14 @@ public actor EOSCamera {
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
         try? await Task.sleep(nanoseconds: 300_000_000)
         // The body answers full-press with DeviceBusy (0x2019) while it's
-        // still settling from the half-press/AF — confirmed on hardware,
-        // not a permanent rejection. Retry with backoff instead of failing;
-        // this is the standard EOS remote-capture pattern (libgphoto2 does
-        // the same).
+        // still settling from the half-press/AF — confirmed on hardware.
+        // On hardware this did NOT clear on its own even after 2s of
+        // retries: capturePhoto() cancels the background event-loop task
+        // before calling this, so nothing was draining GetEvent during the
+        // gap. Canon bodies commonly gate full-press on the host having
+        // acknowledged an AF-confirm event via GetEvent — undrained, the
+        // body just sits busy indefinitely. Poll GetEvent every retry to
+        // keep that channel moving, matching libgphoto2's pattern.
         var fullPressAttempt = 0
         while true {
             fullPressAttempt += 1
@@ -256,7 +260,12 @@ public actor EOSCamera {
             if result.response == nil || result.response?.code == PTPResponseCode.ok {
                 break
             }
-            if result.response?.code == PTPResponseCode.deviceBusy, fullPressAttempt < 10 {
+            if result.response?.code == PTPResponseCode.deviceBusy, fullPressAttempt < 30 {
+                if let eventResult = try? await transport.send(code: CanonOp.getEvent) {
+                    for record in CanonEventRecord.parse(eventResult.payload) where record.type != CanonEvent.propValueChanged {
+                        log(String(format: "  drained event 0x%04X during busy-wait", record.type))
+                    }
+                }
                 log("ReleaseOn(full) busy (attempt \(fullPressAttempt)), retrying")
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 continue
