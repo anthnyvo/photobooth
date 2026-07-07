@@ -96,7 +96,13 @@ public actor EOSCamera {
                     await self.log("event poll error: \(error)")
                     try? await Task.sleep(nanoseconds: 500_000_000)
                 }
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                // Slower now that live view is running: GetEvent and
+                // GetViewFinderData take turns on one shared connection, so
+                // polling events this often was stealing most of live view's
+                // bandwidth for no real benefit — event draining still
+                // matters (keeps the body from wedging) but doesn't need to
+                // be anywhere near this frequent.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
     }
@@ -152,11 +158,13 @@ public actor EOSCamera {
                             await self.log("noFrame: payload \(payload.count) bytes, response code \(result.response.map { String(format: "0x%04X", $0.code) } ?? "none"), prefix [\(prefix)]")
                         }
                     }
-                    // Fixed ~200ms cadence regardless of outcome — matches the
-                    // one documented working poll interval for this operation.
-                    // Tight-looping (the old 50ms-only-on-empty backoff) is a
-                    // known way to keep the body stuck reporting "not ready".
-                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    // The 200ms fixed delay here was a defensive guess made
+                    // while chasing what turned out to be an unrelated bug
+                    // (a stray outData: Data() elsewhere skipping the data-
+                    // phase read entirely). With that fixed, poll as fast as
+                    // the camera/network allow — a tiny yield only, so the
+                    // event loop still gets a turn on the shared connection.
+                    try? await Task.sleep(nanoseconds: 10_000_000)
                 } catch {
                     await self.log("live view poll error: \(error)")
                     try? await Task.sleep(nanoseconds: 200_000_000)
