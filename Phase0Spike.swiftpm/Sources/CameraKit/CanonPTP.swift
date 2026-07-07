@@ -36,6 +36,13 @@ public enum StandardPTPOp {
     public static let getObject: UInt16 = 0x1009
 }
 
+/// Standard (vendor-neutral) PTP event codes, delivered over PTP/IP's
+/// dedicated event connection — a separate mechanism from Canon's own
+/// GetEvent command-response polling used on the command connection.
+public enum StandardPTPEvent {
+    public static let objectAdded: UInt16 = 0x4002
+}
+
 public enum CanonProp {
     public static let evfOutputDevice: UInt32 = 0xD1B0  // 0 = none, 1 = camera TFT, 2 = PC
     public static let evfMode: UInt32 = 0xD1B3          // 1 = enable EVF

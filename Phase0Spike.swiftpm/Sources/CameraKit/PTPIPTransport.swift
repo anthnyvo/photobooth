@@ -45,11 +45,22 @@ public actor PTPIPTransport: PTPTransport {
     public nonisolated let events: AsyncStream<TransportEvent>
     private let eventContinuation: AsyncStream<TransportEvent>.Continuation
 
+    /// Standard PTP events (ObjectAdded in particular) arrive on the
+    /// dedicated event connection established during the handshake — a
+    /// separate mechanism from Canon's own GetEvent command/response
+    /// polling on the command connection. Phase 1 finding: capture was
+    /// timing out waiting for ObjectAdded via GetEvent polling alone;
+    /// this connection is what actually carries it.
+    private let objectAddedStream: AsyncStream<UInt32>
+    private let objectAddedContinuation: AsyncStream<UInt32>.Continuation
+    private var eventReaderTask: Task<Void, Never>?
+
     public init(host: String, port: UInt16 = PTPIPDefaults.port, friendlyName: String = "Photobooth") {
         self.host = host
         self.port = port
         self.friendlyName = friendlyName
         (self.events, self.eventContinuation) = AsyncStream<TransportEvent>.makeStream()
+        (self.objectAddedStream, self.objectAddedContinuation) = AsyncStream<UInt32>.makeStream()
     }
 
     private func emit(_ event: TransportEvent) { eventContinuation.yield(event) }
@@ -89,6 +100,7 @@ public actor PTPIPTransport: PTPTransport {
             throw PTPIPError.unexpectedPacketType(eventAck.type.rawValue)
         }
         log("Init Event Ack ok — both connections established")
+        startEventConnectionReader(on: event)
 
         // Standard PTP requires an explicit OpenSession before anything else
         // works (0x2003 SessionNotOpen otherwise). USB's ImageCaptureCore
@@ -105,7 +117,40 @@ public actor PTPIPTransport: PTPTransport {
         emit(.ready) // no ImageCaptureCore catalog-index gate over Wi-Fi
     }
 
+    /// Continuously reads standard PTP Event packets (type 8) off the
+    /// dedicated event connection and republishes ObjectAdded ones with
+    /// their handle. This connection is otherwise idle — the Canon vendor
+    /// GetEvent command polls the command connection instead — but per the
+    /// PTP/IP spec this is precisely what it's for, and it's the channel
+    /// that actually carries ObjectAdded on this body.
+    private func startEventConnectionReader(on connection: NWConnection) {
+        eventReaderTask?.cancel()
+        eventReaderTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                do {
+                    let packet = try await self.readPacket(on: connection, context: "event-channel")
+                    guard packet.type == .event, packet.payload.count >= 10 else { continue }
+                    let code = packet.payload.readLE(UInt16.self, at: 0)
+                    if code == StandardPTPEvent.objectAdded {
+                        let handle = packet.payload.readLE(UInt32.self, at: 6) // skip 2-byte code + 4-byte txn
+                        await self.log("event channel: ObjectAdded handle 0x\(String(handle, radix: 16))")
+                        await self.publishObjectAdded(handle)
+                    }
+                } catch {
+                    await self.log("event channel read error: \(error)")
+                    return
+                }
+            }
+        }
+    }
+
+    private func publishObjectAdded(_ handle: UInt32) {
+        objectAddedContinuation.yield(handle)
+    }
+
     public func disconnect() {
+        eventReaderTask?.cancel()
         commandConnection?.cancel()
         eventConnection?.cancel()
         commandConnection = nil
@@ -236,27 +281,27 @@ public actor PTPIPTransport: PTPTransport {
 
     // MARK: - Object download (capture retrieval over Wi-Fi)
 
-    /// Waits for an ObjectAdded event on the (paused, per EOSCamera's
-    /// contract during capture) event channel by polling GetEvent directly,
-    /// then downloads the object via standard GetObjectInfo/GetObject.
-    /// Best-effort — the exact ObjectAddedEx payload layout (handle as the
-    /// first u32) is a reasonable, common assumption, not one confirmed on
-    /// this specific body yet.
+    /// Waits for an ObjectAdded event on the dedicated PTP/IP event
+    /// connection, then downloads the object via standard
+    /// GetObjectInfo/GetObject. Phase 1 finding: this body delivers
+    /// ObjectAdded there, not via Canon's GetEvent command/response on the
+    /// command connection (which is what the previous version polled,
+    /// unsuccessfully, for the full timeout every time).
     public func nextCapturedFile(timeout: TimeInterval) async throws -> Data {
-        let deadline = Date().addingTimeInterval(timeout)
-        var handle: UInt32?
-        while Date() < deadline {
-            let result = try await send(code: CanonOp.getEvent, parameters: [], outData: nil)
-            for record in CanonEventRecord.parse(result.payload) {
-                if record.type == CanonEvent.objectAddedEx || record.type == CanonEvent.objectAddedEx64,
-                   record.payload.count >= 4 {
-                    handle = record.payload.readLE(UInt32.self, at: 0)
-                }
+        let objectHandle: UInt32? = await withTaskGroup(of: UInt32?.self) { group in
+            group.addTask { [objectAddedStream] in
+                for await handle in objectAddedStream { return handle }
+                return nil
             }
-            if handle != nil { break }
-            try? await Task.sleep(nanoseconds: 150_000_000)
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
         }
-        guard let objectHandle = handle else {
+        guard let objectHandle else {
             throw TransportError.timeout("no ObjectAdded event within \(timeout)s of capture")
         }
         log("captured object handle 0x\(String(objectHandle, radix: 16))")
