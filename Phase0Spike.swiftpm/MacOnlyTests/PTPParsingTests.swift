@@ -1,5 +1,7 @@
+// NOTE: Not part of the Playgrounds app build (lives outside Sources/).
+// Runnable later on a Mac or CI once CameraKit is re-extracted into its own
+// package — then restore `@testable import CameraKit`.
 import XCTest
-@testable import CameraKit
 
 /// Pure parsing tests — run without hardware. Hardware truth still comes from
 /// the spike app; these lock down the byte-level logic so on-device debugging
