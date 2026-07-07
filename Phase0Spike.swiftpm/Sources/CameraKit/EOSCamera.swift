@@ -106,8 +106,14 @@ public actor EOSCamera {
     /// Starts polling live view frames. Frames arrive on the returned stream;
     /// fps and framing diagnostics accumulate in `liveViewStats`.
     public func startLiveView() async throws -> AsyncStream<Data> {
-        try await setProperty(CanonProp.evfMode, 1, name: "EVFMode")
-        try await setProperty(CanonProp.evfOutputDevice, 2, name: "EVFOutputDevice=PC")
+        // Matches the proven-working sequence (Canon PTP/IP reference
+        // implementations): only EVFOutputDevice is set. There is no
+        // separate "EVFMode" property in that sequence — the extra
+        // 0xD1B3 set this code used to send has no confirmed purpose and
+        // was a likely cause of the camera never actually starting the
+        // stream (GetViewFinderData returned 0 bytes / OK indefinitely).
+        // 3 = cameraAndHost, so the camera's own screen stays live too.
+        try await setProperty(CanonProp.evfOutputDevice, 3, name: "EVFOutputDevice=cameraAndHost")
         state = .liveView
         liveViewStats = LiveViewStats()
 
