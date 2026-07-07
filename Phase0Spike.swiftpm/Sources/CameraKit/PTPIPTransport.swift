@@ -225,7 +225,7 @@ public actor PTPIPTransport: PTPTransport {
                 let response = PTPContainer(kind: .response, code: parsed.code,
                                             transactionID: parsed.transactionID, parameters: parsed.parameters)
                 if verbose {
-                    log("[\(context)] response: \(response.code == PTPResponseCode.ok ? "OK" : String(format: "0x%04X", response.code))")
+                    await self.log("[\(context)] response: \(response.code == PTPResponseCode.ok ? "OK" : String(format: "0x%04X", response.code))")
                 }
                 await self.exitExclusive()
                 return PTPTransactionResult(payload: inboundPayload, response: response, rawInbound: inboundPayload)
