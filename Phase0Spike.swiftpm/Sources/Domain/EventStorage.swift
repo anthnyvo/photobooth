@@ -1,0 +1,123 @@
+import Foundation
+
+/// Local-only storage layout: everything lives under the app's Documents
+/// folder, nothing leaves the device except through an explicit share/print/
+/// export action. Layout: Events/<eventId>/{config.json, assets/, photos/}.
+public final class EventStorage {
+    public static let shared = EventStorage()
+
+    private let fileManager = FileManager.default
+    private let currentEventKey = "com.anthonyvo.photobooth.currentEventId"
+
+    private var eventsRoot: URL {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("Events", isDirectory: true)
+    }
+
+    private init() {}
+
+    public func eventDirectory(_ eventId: String) -> URL {
+        eventsRoot.appendingPathComponent(eventId, isDirectory: true)
+    }
+
+    public func assetsDirectory(_ eventId: String) -> URL {
+        eventDirectory(eventId).appendingPathComponent("assets", isDirectory: true)
+    }
+
+    public func photosDirectory(_ eventId: String) -> URL {
+        eventDirectory(eventId).appendingPathComponent("photos", isDirectory: true)
+    }
+
+    private func configURL(_ eventId: String) -> URL {
+        eventDirectory(eventId).appendingPathComponent("config.json")
+    }
+
+    // MARK: - Create / load / save
+
+    @discardableResult
+    public func createEvent(_ config: EventConfig) throws -> EventConfig {
+        try fileManager.createDirectory(at: eventDirectory(config.eventId), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: assetsDirectory(config.eventId), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: photosDirectory(config.eventId), withIntermediateDirectories: true)
+        try save(config)
+        setCurrentEventId(config.eventId)
+        return config
+    }
+
+    public func save(_ config: EventConfig) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(config)
+        try data.write(to: configURL(config.eventId), options: .atomic)
+    }
+
+    public func load(_ eventId: String) throws -> EventConfig {
+        let data = try Data(contentsOf: configURL(eventId))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(EventConfig.self, from: data)
+    }
+
+    public func listEventIds() -> [String] {
+        (try? fileManager.contentsOfDirectory(at: eventsRoot, includingPropertiesForKeys: nil))?
+            .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            .map { $0.lastPathComponent }
+            .sorted() ?? []
+    }
+
+    // MARK: - Current event pointer
+
+    public func currentEventId() -> String? {
+        UserDefaults.standard.string(forKey: currentEventKey)
+    }
+
+    public func setCurrentEventId(_ eventId: String) {
+        UserDefaults.standard.set(eventId, forKey: currentEventKey)
+    }
+
+    /// The event to actually run with: current pointer if it still exists on
+    /// disk, otherwise falls back to a fresh standard-branded default so the
+    /// booth never launches into a broken state.
+    public func loadCurrentOrDefault() -> EventConfig {
+        if let id = currentEventId(), let config = try? load(id) {
+            return config
+        }
+        let fallback = EventConfig.standardDefault()
+        try? createEvent(fallback)
+        return fallback
+    }
+
+    // MARK: - Assets
+
+    @discardableResult
+    public func importAsset(from sourceURL: URL, eventId: String, filename: String) throws -> String {
+        let dest = assetsDirectory(eventId).appendingPathComponent(filename)
+        if fileManager.fileExists(atPath: dest.path) {
+            try fileManager.removeItem(at: dest)
+        }
+        try fileManager.copyItem(at: sourceURL, to: dest)
+        return filename
+    }
+
+    public func assetURL(eventId: String, filename: String) -> URL {
+        assetsDirectory(eventId).appendingPathComponent(filename)
+    }
+
+    // MARK: - Photos
+
+    /// Saves a captured photo under the event's photos/ folder, named by
+    /// timestamp so ordering is free and collisions are practically impossible.
+    @discardableResult
+    public func savePhoto(_ data: Data, eventId: String) throws -> URL {
+        let name = "IMG_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+        let dest = photosDirectory(eventId).appendingPathComponent(name)
+        try data.write(to: dest, options: .atomic)
+        return dest
+    }
+
+    public func listPhotos(eventId: String) -> [URL] {
+        (try? fileManager.contentsOfDirectory(at: photosDirectory(eventId), includingPropertiesForKeys: [.creationDateKey]))?
+            .sorted { ($0.lastPathComponent) > ($1.lastPathComponent) } ?? []
+    }
+}

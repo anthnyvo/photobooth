@@ -4,7 +4,7 @@ import SwiftUI
 struct Phase0SpikeApp: App {
     var body: some Scene {
         WindowGroup {
-            SpikeView()
+            BoothRootView()
                 .preferredColorScheme(.dark)
         }
     }
