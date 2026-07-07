@@ -21,11 +21,13 @@ let package = Package(
             appIcon: .placeholder(icon: .camera),
             accentColor: .presetColor(.blue),
             supportedDeviceFamilies: [
-                .pad
+                .pad,
+                .phone
             ],
             supportedInterfaceOrientations: [
                 .landscapeRight,
-                .landscapeLeft
+                .landscapeLeft,
+                .portrait
             ],
             capabilities: [
                 .camera(purposeString: "Connects to the Canon EOS R over USB to run the photobooth.")

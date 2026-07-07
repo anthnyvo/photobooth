@@ -2,10 +2,15 @@ import SwiftUI
 
 struct SpikeView: View {
     @StateObject private var model = SpikeViewModel()
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Left: live view + capture
+        // iPad: capture left, log right. iPhone (compact): log below.
+        let layout = sizeClass == .compact
+            ? AnyLayout(VStackLayout(spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 0))
+        layout {
+            // Live view + capture
             VStack(spacing: 12) {
                 statusBanner
 
@@ -100,7 +105,8 @@ struct SpikeView: View {
                 }
             }
             .padding()
-            .frame(width: 380)
+            .frame(maxWidth: sizeClass == .compact ? .infinity : 380,
+                   maxHeight: sizeClass == .compact ? 260 : .infinity)
             .background(Color(.secondarySystemBackground))
         }
         .onAppear { model.start() }

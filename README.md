@@ -16,46 +16,45 @@ Phase0Spike.swiftpm/   Swift Playgrounds app project — builds and runs ON THE 
 docs/PHASE0.md         Test protocol T1–T7, exit criteria, fallback ladder, findings log
 ```
 
-## No-Mac build workflow (Windows PC + iPad)
+## Hardware plan
 
-The `.swiftpm` folder is a **Swift Playgrounds app project**. Swift Playgrounds 4+
-(free, App Store) compiles and runs it directly on the iPad.
+- **Now (dev + Phase 0 rig):** iPhone 17 (USB-C) — same ImageCaptureCore PTP surface as
+  iPadOS, so the tethering spike is fully valid on it. UI adapts to the small screen.
+- **Events:** iPad Air (to be acquired). Booth UI is designed for it; nothing built on
+  the iPhone gets thrown away.
 
-### Get the project onto the iPad — pick one
+## No-Mac build workflow
 
-- **A. Git loop (recommended for ongoing dev):** push this repo to GitHub (private is fine).
-  On the iPad install **Working Copy** (free tier clones/pulls), clone the repo, then in
-  Files → Working Copy → repo → tap `Phase0Spike.swiftpm` → opens in Playgrounds.
-  Iteration loop: code edited on the PC → push → pull in Working Copy → rerun in
-  Playgrounds. No re-transfer, no cable.
-- **B. iCloud Drive:** install iCloud for Windows, copy the whole `Phase0Spike.swiftpm`
-  folder into iCloud Drive; on the iPad open it from Files.
-- **C. Any file transfer:** zip the folder, move it however (Drive/AirDrop-alternative),
-  unzip in the Files app on iPad, tap the `.swiftpm`.
+### Current loop: Windows PC → GitHub Actions → AltServer → iPhone 17
 
-### Run
+1. **One-time PC setup:** install Apple's own **iTunes** and **iCloud** installers
+   (from apple.com, NOT the Microsoft Store versions), then **AltServer for Windows**
+   (altstore.io). AltServer sits in the system tray.
+2. Code edited on the PC → push → repo **Actions** tab → run **Build unsigned IPA**
+   (or `gh workflow run build-ipa.yml`) → download the `Phase0Spike-unsigned-ipa` artifact, unzip.
+3. iPhone plugged into the PC via USB → AltServer tray icon → **Sideload .ipa** →
+   pick the file, sign in with the free Apple ID when asked.
+4. On the iPhone: Settings → General → VPN & Device Management → trust the developer
+   profile (first install only).
+5. Free-ID signing expires every **7 days** — resideload or let AltStore auto-refresh
+   over shared Wi-Fi with the PC.
 
-1. Open `Phase0Spike.swiftpm` in Swift Playgrounds → tap **Run**.
-2. First build may surface small compiler complaints (this code was written off-device;
-   ImageCaptureCore's required delegate methods vary slightly by SDK — add empty stubs
-   for whatever it names).
-3. Plug the EOS R into the iPad's USB-C port, then follow `docs/PHASE0.md` T1–T7.
-4. Diagnostics: the app's own log panel (with Export button) is the primary record;
-   Playgrounds' console shows the same lines via `print`.
+Budget note: macOS CI minutes are 10x on private repos (~200 effective/month ≈ 20 builds).
+If iteration gets minute-starved, making the repo public buys unlimited free minutes.
 
-### Known risk of the Playgrounds path
+### Later loop: iPad Air + Swift Playgrounds (no PC in the loop)
 
-Playgrounds-built apps run with a limited entitlement set. ImageCaptureCore external-camera
-access from a Playgrounds app is **unverified** — it is itself a Phase 0 finding. Symptom
-if blocked: camera never appears (no `camera found` log) or no permission prompt.
+The `.swiftpm` folder is also a **Swift Playgrounds app project**. On the iPad:
+install Swift Playgrounds + Working Copy (both free), clone this repo in Working Copy,
+tap `Phase0Spike.swiftpm` in Files → opens in Playgrounds → Run. Iteration = push from
+PC, pull in Working Copy, rerun. Caveat: whether Playgrounds' entitlement set allows
+ImageCaptureCore external-camera access is unverified; if blocked (no `camera found`
+log ever), use the AltServer loop above for the iPad too.
 
-**Fallback (still $0, no Mac):** `.github/workflows/build-ipa.yml` — manual-trigger
-GitHub Actions job on a free macOS runner, produces an unsigned `.ipa` artifact.
-To use: repo → Actions tab → "Build unsigned IPA" → Run workflow → download artifact →
-sideload with **AltServer for Windows** (signs with a free Apple ID over USB; 7-day
-resign cycle, AltStore on the iPad can auto-refresh). AltServer needs Apple's own
-iTunes + iCloud installers on the PC, not the Microsoft Store versions.
-Manual-trigger only: macOS minutes are 10x on private repos (~200 free/month ≈ 20 builds).
+### Testing on the phone
+
+Plug the EOS R into the iPhone's USB-C port, then follow `docs/PHASE0.md` T1–T7.
+Diagnostics: the app's log panel (Export button) is the primary record.
 
 ## Camera settings for the spike
 
