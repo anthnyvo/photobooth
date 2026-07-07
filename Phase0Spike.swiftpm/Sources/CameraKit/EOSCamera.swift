@@ -244,8 +244,26 @@ public actor EOSCamera {
         try await expectOK("ReleaseOn(half)",
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
         try? await Task.sleep(nanoseconds: 300_000_000)
-        try await expectOK("ReleaseOn(full)",
-            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0]))
+        // The body answers full-press with DeviceBusy (0x2019) while it's
+        // still settling from the half-press/AF — confirmed on hardware,
+        // not a permanent rejection. Retry with backoff instead of failing;
+        // this is the standard EOS remote-capture pattern (libgphoto2 does
+        // the same).
+        var fullPressAttempt = 0
+        while true {
+            fullPressAttempt += 1
+            let result = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0])
+            if result.response == nil || result.response?.code == PTPResponseCode.ok {
+                break
+            }
+            if result.response?.code == PTPResponseCode.deviceBusy, fullPressAttempt < 10 {
+                log("ReleaseOn(full) busy (attempt \(fullPressAttempt)), retrying")
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                continue
+            }
+            log(String(format: "ReleaseOn(full) failed: 0x%04X", result.response?.code ?? 0))
+            throw EOSError.badResponse(operation: "ReleaseOn(full)", code: result.response?.code)
+        }
         try await expectOK("ReleaseOff(full)",
             await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2]))
         try await expectOK("ReleaseOff(half)",
