@@ -194,26 +194,44 @@ public actor PTPIPTransport: PTPTransport {
         busyContext = nil
     }
 
-    /// Reads Start Data Packet -> zero or more Data Packets -> End Data Packet,
+    /// Reads Start Data Packet -> zero or more Data/End Data Packets,
     /// concatenating the payload bytes.
+    ///
+    /// Terminates once the Start Data Packet's own *declared total length*
+    /// has been collected, rather than trusting the End Data Packet marker
+    /// alone. Hardware traffic showed a persistent, non-concurrency related
+    /// desync (proven separately via a reentrancy assertion that never
+    /// fired) where trusting packet *type* to signal completion went wrong
+    /// somewhere — using the length this camera already tells us up front
+    /// is a stronger, independently-checkable signal than guessing its
+    /// exact type-sequence convention.
     private func readDataPhase(on connection: NWConnection, context: String) async throws -> Data {
         let start = try await readPacket(on: connection, context: context)
         guard start.type == .startDataPacket else {
             throw PTPIPError.unexpectedPacketType(start.type.rawValue)
         }
+        guard start.payload.count >= 12 else {
+            throw PTPIPError.malformedPacket("Start Data Packet payload too short for declared length")
+        }
+        let totalLength = Int(start.payload.readLE(UInt64.self, at: 4))
+        log("[\(context)] data phase declared length: \(totalLength) bytes")
+
         var collected = Data()
-        while true {
+        collected.reserveCapacity(totalLength)
+        while collected.count < totalLength {
             let packet = try await readPacket(on: connection, context: context)
             switch packet.type {
-            case .dataPacket:
+            case .dataPacket, .endDataPacket:
                 collected.append(packet.payload.dropFirst(4)) // strip leading transaction ID
-            case .endDataPacket:
-                collected.append(packet.payload.dropFirst(4))
-                return collected
+                if packet.type == .endDataPacket && collected.count < totalLength {
+                    log("!! [\(context)] End Data Packet arrived with only \(collected.count)/\(totalLength) bytes collected")
+                }
             default:
-                throw PTPIPError.unexpectedPacketType(packet.type.rawValue)
+                log("!! [\(context)] unexpected \(packet.type) mid-data-phase with \(collected.count)/\(totalLength) bytes collected — treating as end of phase")
+                return collected
             }
         }
+        return collected
     }
 
     // MARK: - Object download (capture retrieval over Wi-Fi)
