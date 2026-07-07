@@ -231,8 +231,45 @@ extension ICCTransport: ICCameraDeviceDelegate {
 
 /// Serializes async operations (PTP allows one in-flight transaction).
 /// Shared by both transports (USB and PTP/IP), hence not file-private.
+///
+/// This is a real mutex, not just "only one call to `run` starts at a time" —
+/// Swift actors are reentrant across `await` suspension points, so a naive
+/// `actor { func run(_ op) { await op() } }` lets a second caller's operation
+/// begin executing while the first is mid-await, which for a shared TCP
+/// socket means their reads/writes interleave and corrupt packet framing
+/// (a real bug found wiring up PTPIPTransport: the background GetEvent
+/// poller raced a property-set call on the same connection). Holding the
+/// lock across the whole operation, not just its synchronous prefix, is
+/// the point of this queue.
 actor SerialGate {
-    func run<T: Sendable>(_ operation: @Sendable () async throws -> T) async rethrows -> T {
-        try await operation()
+    private var isLocked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    private func acquire() async {
+        if !isLocked {
+            isLocked = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    private func release() {
+        if waiters.isEmpty {
+            isLocked = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+
+    func run<T: Sendable>(_ operation: @Sendable () async throws -> T) async throws -> T {
+        await acquire()
+        do {
+            let result = try await operation()
+            release()
+            return result
+        } catch {
+            release()
+            throw error
+        }
     }
 }
