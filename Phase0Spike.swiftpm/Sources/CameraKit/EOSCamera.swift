@@ -241,31 +241,24 @@ public actor EOSCamera {
         // produced a single record afterward: nothing was actually triggered.
         // EOS bodies need the half-press (AF) + full-press pair instead,
         // matching libgphoto2's ptp2 camlib and EOS Utility's own sequence.
+        // Single-param convention, matching ReleaseOff below (which already
+        // works). The previous 2-param form ([1,0]/[2,0]) left full-press
+        // stuck returning DeviceBusy (0x2019) for 30 straight retries over
+        // 7s on hardware, with zero GetEvent activity in between — not an
+        // AF-settle delay, more consistent with the body treating the extra
+        // parameter as malformed and refusing outright. ReleaseOff never had
+        // this problem and has only ever taken one param.
         try await expectOK("ReleaseOn(half)",
-            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
+            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1]))
         try? await Task.sleep(nanoseconds: 300_000_000)
-        // The body answers full-press with DeviceBusy (0x2019) while it's
-        // still settling from the half-press/AF — confirmed on hardware.
-        // On hardware this did NOT clear on its own even after 2s of
-        // retries: capturePhoto() cancels the background event-loop task
-        // before calling this, so nothing was draining GetEvent during the
-        // gap. Canon bodies commonly gate full-press on the host having
-        // acknowledged an AF-confirm event via GetEvent — undrained, the
-        // body just sits busy indefinitely. Poll GetEvent every retry to
-        // keep that channel moving, matching libgphoto2's pattern.
         var fullPressAttempt = 0
         while true {
             fullPressAttempt += 1
-            let result = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0])
+            let result = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2])
             if result.response == nil || result.response?.code == PTPResponseCode.ok {
                 break
             }
-            if result.response?.code == PTPResponseCode.deviceBusy, fullPressAttempt < 30 {
-                if let eventResult = try? await transport.send(code: CanonOp.getEvent) {
-                    for record in CanonEventRecord.parse(eventResult.payload) where record.type != CanonEvent.propValueChanged {
-                        log(String(format: "  drained event 0x%04X during busy-wait", record.type))
-                    }
-                }
+            if result.response?.code == PTPResponseCode.deviceBusy, fullPressAttempt < 10 {
                 log("ReleaseOn(full) busy (attempt \(fullPressAttempt)), retrying")
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 continue
