@@ -145,12 +145,14 @@ public actor PTPIPTransport: PTPTransport {
                     payload: PTPIPCodec.dataPacketPayload(transactionID: txn, chunk: outData)).encoded(), on: command)
             }
 
+            let context = String(format: "opcode=0x%04X txn=%d", code, txn)
+
             var inboundPayload = Data()
             if outData == nil && hasDataPhase {
-                inboundPayload = try await self.readDataPhase(on: command)
+                inboundPayload = try await self.readDataPhase(on: command, context: context)
             }
 
-            let responsePacket = try await self.readPacket(on: command)
+            let responsePacket = try await self.readPacket(on: command, context: context)
             guard responsePacket.type == .operationResponse else {
                 throw PTPIPError.unexpectedPacketType(responsePacket.type.rawValue)
             }
@@ -165,14 +167,14 @@ public actor PTPIPTransport: PTPTransport {
 
     /// Reads Start Data Packet -> zero or more Data Packets -> End Data Packet,
     /// concatenating the payload bytes.
-    private func readDataPhase(on connection: NWConnection) async throws -> Data {
-        let start = try await readPacket(on: connection)
+    private func readDataPhase(on connection: NWConnection, context: String) async throws -> Data {
+        let start = try await readPacket(on: connection, context: context)
         guard start.type == .startDataPacket else {
             throw PTPIPError.unexpectedPacketType(start.type.rawValue)
         }
         var collected = Data()
         while true {
-            let packet = try await readPacket(on: connection)
+            let packet = try await readPacket(on: connection, context: context)
             switch packet.type {
             case .dataPacket:
                 collected.append(packet.payload.dropFirst(4)) // strip leading transaction ID
@@ -272,18 +274,18 @@ public actor PTPIPTransport: PTPTransport {
     /// (length - 8) bytes of payload. TCP gives no message boundaries, so
     /// this reads in two fixed-size passes rather than trusting one call to
     /// return a whole packet.
-    private func readPacket(on connection: NWConnection) async throws -> PTPIPPacket {
+    private func readPacket(on connection: NWConnection, context: String = "") async throws -> PTPIPPacket {
         let header = try await readExactly(8, on: connection)
         let length = Int(header.readLE(UInt32.self, at: 0))
         let rawType = header.readLE(UInt32.self, at: 4)
         guard let type = PTPIPPacketType(rawValue: rawType) else {
             let prefix = header.map { String(format: "%02X", $0) }.joined(separator: " ")
-            log("!! unknown packet type \(rawType) (0x\(String(rawType, radix: 16))), length field \(length), header bytes [\(prefix)]")
+            log("!! [\(context)] unknown packet type \(rawType) (0x\(String(rawType, radix: 16))), length field \(length), header bytes [\(prefix)]")
             throw PTPIPError.malformedPacket("unknown packet type in header")
         }
         guard length >= 8 else { throw PTPIPError.malformedPacket("packet length \(length) < header size") }
         let payload = length > 8 ? try await readExactly(length - 8, on: connection) : Data()
-        log("packet read: \(type) (\(payload.count) byte payload)")
+        log("[\(context)] packet read: \(type) (\(payload.count) byte payload)")
         return PTPIPPacket(type: type, payload: payload)
     }
 
