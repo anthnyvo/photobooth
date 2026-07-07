@@ -31,6 +31,7 @@ public enum CanonOp {
 /// PTP/IP — USB capture retrieval goes through ImageCaptureCore's own file
 /// APIs instead, so these were never needed there.
 public enum StandardPTPOp {
+    public static let openSession: UInt16 = 0x1002
     public static let getObjectInfo: UInt16 = 0x1008
     public static let getObject: UInt16 = 0x1009
 }

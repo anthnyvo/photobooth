@@ -80,6 +80,17 @@ public actor PTPIPTransport: PTPTransport {
             throw PTPIPError.unexpectedPacketType(eventAck.type.rawValue)
         }
         log("Init Event Ack ok — both connections established")
+
+        // Standard PTP requires an explicit OpenSession before anything else
+        // works (0x2003 SessionNotOpen otherwise). USB's ImageCaptureCore
+        // does this invisibly via requestOpenSession(); over raw PTP/IP we
+        // have to do it ourselves.
+        let openResult = try await send(code: StandardPTPOp.openSession, parameters: [1], outData: nil)
+        guard openResult.response?.code == PTPResponseCode.ok else {
+            throw PTPIPError.initFailed("OpenSession failed: \(openResult.response.map { String(format: "0x%04X", $0.code) } ?? "no response")")
+        }
+        log("OpenSession ok")
+
         emit(.deviceFound(name: ack.cameraName.isEmpty ? "Canon (PTP/IP)" : ack.cameraName))
         emit(.sessionOpened)
         emit(.ready) // no ImageCaptureCore catalog-index gate over Wi-Fi
