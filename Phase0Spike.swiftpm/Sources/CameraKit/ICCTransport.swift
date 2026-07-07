@@ -232,35 +232,55 @@ extension ICCTransport: ICCameraDeviceDelegate {
 /// Serializes async operations (PTP allows one in-flight transaction).
 /// Shared by both transports (USB and PTP/IP), hence not file-private.
 ///
-/// Hardware proof this needs to be airtight: with an earlier acquire/release
-/// version of this gate (isLocked flag + a waiter queue, both actor-isolated),
-/// real traffic still showed two different PTP transactions' packets
-/// interleaved mid-read on the same TCP connection — e.g. transaction 8's
-/// Start Data Packet immediately followed by transaction 9's Data Packet,
-/// each tagged at the point of origin, so it wasn't a logging artifact.
-/// The likely cause: once `operation()` suspends on a *different* actor
-/// (PTPIPTransport, for the actual socket I/O), the gate's own actor
-/// executor is free again — an isLocked check doesn't stop a *new* call to
-/// `run` from being serviced by that free executor, because the flag lives
-/// in the same isolation domain the runtime is happy to re-enter.
+/// Two earlier designs both failed under real hardware traffic — an
+/// acquire/release flag (actor-isolated `isLocked` + waiter continuations)
+/// and, after that, explicit Task-handle chaining (each call awaiting the
+/// previous call's `Task.value` before starting its own). Both should have
+/// worked by every reasoning about Swift's actor/Task semantics available,
+/// and both still let two different PTP transactions' packets interleave on
+/// the same TCP connection — e.g. transaction 9's own Start Data Packet
+/// immediately followed by a read that transaction 10 (a completely
+/// separate call) attributed to itself, proven by tagging every packet log
+/// with its owning (opcode, transactionID) at the point of origin, not by
+/// display order.
 ///
-/// This version doesn't depend on any of that: each call explicitly chains
-/// onto a `Task` handle for the previous call and awaits its completion via
-/// `.value` before running its own operation. A `Task.value` await is
-/// documented to only resume once that exact task's body has finished, full
-/// stop — there's no isolation-domain subtlety left to get wrong.
+/// This version doesn't reason about isolation/suspension semantics at
+/// all — it sidesteps the question by construction. A single background
+/// Task consumes jobs from an AsyncStream one at a time in a plain
+/// `for await job in stream { await job() }` loop; the next job's body
+/// cannot start running until `await job()` for the current one returns,
+/// because that's just what a single sequential loop is. There's no shared
+/// flag or task handle for a subtle bug to hide in.
 actor SerialGate {
-    private var tail: Task<Void, Never> = Task {}
+    private let stream: AsyncStream<@Sendable () async -> Void>
+    private let continuation: AsyncStream<@Sendable () async -> Void>.Continuation
+    private var workerTask: Task<Void, Never>?
+
+    init() {
+        (stream, continuation) = AsyncStream.makeStream()
+    }
+
+    private func startWorkerIfNeeded() {
+        guard workerTask == nil else { return }
+        let jobs = stream
+        workerTask = Task {
+            for await job in jobs {
+                await job()
+            }
+        }
+    }
 
     func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
-        let previousTail = tail
-        let resultTask = Task<T, Error> {
-            _ = await previousTail.value
-            return try await operation()
+        startWorkerIfNeeded()
+        return try await withCheckedThrowingContinuation { (resume: CheckedContinuation<T, Error>) in
+            continuation.yield {
+                do {
+                    let result = try await operation()
+                    resume.resume(returning: result)
+                } catch {
+                    resume.resume(throwing: error)
+                }
+            }
         }
-        tail = Task {
-            _ = try? await resultTask.value
-        }
-        return try await resultTask.value
     }
 }
