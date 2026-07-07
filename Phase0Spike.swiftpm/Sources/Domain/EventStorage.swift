@@ -100,6 +100,16 @@ public final class EventStorage {
         return filename
     }
 
+    /// For picker-sourced image data (PhotosPicker etc.) that arrives as raw
+    /// bytes rather than a file URL.
+    @discardableResult
+    public func importLogoData(_ data: Data, eventId: String, filename: String = "logo.png") throws -> String {
+        try fileManager.createDirectory(at: assetsDirectory(eventId), withIntermediateDirectories: true)
+        let dest = assetsDirectory(eventId).appendingPathComponent(filename)
+        try data.write(to: dest, options: .atomic)
+        return filename
+    }
+
     public func assetURL(eventId: String, filename: String) -> URL {
         assetsDirectory(eventId).appendingPathComponent(filename)
     }

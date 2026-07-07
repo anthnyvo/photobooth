@@ -49,6 +49,7 @@ struct BoothRootView: View {
 private struct ConnectView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
+    @State private var showAdmin = false
 
     var body: some View {
         ZStack {
@@ -82,6 +83,16 @@ private struct ConnectView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
+
+                Button("Event Setup") { showAdmin = true }
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .padding(.top, 20)
+            }
+        }
+        .sheet(isPresented: $showAdmin) {
+            PINGate {
+                AdminView(model: model)
             }
         }
     }
