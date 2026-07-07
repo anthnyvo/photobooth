@@ -29,18 +29,20 @@ public actor PTPIPTransport: PTPTransport {
     private var connectionNumber: UInt32 = 0
     private let sendGate = SerialGate()
 
-    private var eventContinuation: AsyncStream<TransportEvent>.Continuation?
-    public private(set) lazy var events: AsyncStream<TransportEvent> = {
-        AsyncStream { continuation in self.eventContinuation = continuation }
-    }()
+    // Built eagerly in init rather than lazily, so `events` can be a plain
+    // nonisolated `let` — callers subscribe without needing to hop onto this
+    // actor first, same as ICCTransport's (non-actor) property.
+    public nonisolated let events: AsyncStream<TransportEvent>
+    private let eventContinuation: AsyncStream<TransportEvent>.Continuation
 
     public init(host: String, port: UInt16 = PTPIPDefaults.port, friendlyName: String = "Photobooth") {
         self.host = host
         self.port = port
         self.friendlyName = friendlyName
+        (self.events, self.eventContinuation) = AsyncStream<TransportEvent>.makeStream()
     }
 
-    private func emit(_ event: TransportEvent) { eventContinuation?.yield(event) }
+    private func emit(_ event: TransportEvent) { eventContinuation.yield(event) }
     private func log(_ message: String) { emit(.log("[PTPIP] \(message)")) }
 
     // MARK: - Connect
@@ -93,11 +95,23 @@ public actor PTPIPTransport: PTPTransport {
 
     // MARK: - PTPTransport
 
+    // Actor-isolated stored-property access has to go through methods (not
+    // bare reads/writes) when called from inside the SerialGate closure
+    // below, which executes on a different actor's isolation.
+    private func requireCommandConnection() throws -> NWConnection {
+        guard let commandConnection else { throw TransportError.noDevice }
+        return commandConnection
+    }
+
+    private func nextTransactionID() -> UInt32 {
+        transactionID &+= 1
+        return transactionID
+    }
+
     public func send(code: UInt16, parameters: [UInt32], outData: Data?) async throws -> PTPTransactionResult {
         try await sendGate.run {
-            guard let command = self.commandConnection else { throw TransportError.noDevice }
-            self.transactionID &+= 1
-            let txn = self.transactionID
+            let command = try await self.requireCommandConnection()
+            let txn = await self.nextTransactionID()
             let hasDataPhase = Self.dataPhaseOpcodes.contains(code)
 
             let reqPayload = PTPIPCodec.operationRequestPayload(
