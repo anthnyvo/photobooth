@@ -114,6 +114,11 @@ public actor EOSCamera {
         // stream (GetViewFinderData returned 0 bytes / OK indefinitely).
         // 3 = cameraAndHost, so the camera's own screen stays live too.
         try await setProperty(CanonProp.evfOutputDevice, 3, name: "EVFOutputDevice=cameraAndHost")
+        // Settle time: the sensor/imaging pipeline needs a moment to actually
+        // start streaming after this property lands. Polling immediately (and
+        // then hammering the body every ~50ms) is a documented way to keep a
+        // Canon EOS body stuck reporting "not ready" indefinitely.
+        try? await Task.sleep(nanoseconds: 500_000_000)
         state = .liveView
         liveViewStats = LiveViewStats()
 
@@ -146,9 +151,12 @@ public actor EOSCamera {
                             let prefix = payload.prefix(24).map { String(format: "%02X", $0) }.joined(separator: " ")
                             await self.log("noFrame: payload \(payload.count) bytes, response code \(result.response.map { String(format: "0x%04X", $0.code) } ?? "none"), prefix [\(prefix)]")
                         }
-                        // Camera not ready yet / frame not available — back off briefly.
-                        try? await Task.sleep(nanoseconds: 50_000_000)
                     }
+                    // Fixed ~200ms cadence regardless of outcome — matches the
+                    // one documented working poll interval for this operation.
+                    // Tight-looping (the old 50ms-only-on-empty backoff) is a
+                    // known way to keep the body stuck reporting "not ready".
+                    try? await Task.sleep(nanoseconds: 200_000_000)
                 } catch {
                     await self.log("live view poll error: \(error)")
                     try? await Task.sleep(nanoseconds: 200_000_000)
