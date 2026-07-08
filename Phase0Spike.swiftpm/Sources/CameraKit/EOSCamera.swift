@@ -248,36 +248,38 @@ public actor EOSCamera {
 
     private func triggerShutter() async throws {
         // Bare 0x910F (RemoteRelease) acks OK on EOS bodies but is a no-op —
-        // it's a legacy PowerShot-era release, not implemented on EOS. That's
-        // why capture logged "shutter via RemoteRelease" yet GetEvent never
-        // produced a single record afterward: nothing was actually triggered.
-        // EOS bodies need the half-press (AF) + full-press pair instead,
-        // matching libgphoto2's ptp2 camlib and EOS Utility's own sequence.
-        // Single-param convention, matching ReleaseOff below (which already
-        // works). The previous 2-param form ([1,0]/[2,0]) left full-press
-        // stuck returning DeviceBusy (0x2019) for 30 straight retries over
-        // 7s on hardware, with zero GetEvent activity in between — not an
-        // AF-settle delay, more consistent with the body treating the extra
-        // parameter as malformed and refusing outright. ReleaseOff never had
-        // this problem and has only ever taken one param.
+        // it's a legacy PowerShot-era release, not implemented on EOS. EOS
+        // bodies need the half-press (AF) + full-press pair instead,
+        // matching libgphoto2's ptp2 camlib (camera_trigger_canon_eos_capture
+        // in library.c) and EOS Utility's own sequence. Confirmed against
+        // that source: RemoteReleaseOn takes 2 params (press-stage, 0) —
+        // the earlier single-param theory was a dead end, made no difference.
+        //
+        // The actual root cause of every prior DeviceBusy (0x2019) failure
+        // today: on a failed full-press, libgphoto2 ALWAYS releases the
+        // half-press before returning the error. Our code never did — every
+        // failed attempt left the body physically stuck half-pressed, and it
+        // reports DeviceBusy for every future full-press until that release
+        // finally happens. That state persists across our app's disconnects
+        // (it's the camera's own physical/logical button state, not our
+        // session's) — explaining why retries, event-draining, EVF teardown,
+        // and reconnecting all failed identically: the camera has been
+        // wedged since the first failed attempt, not re-broken each time.
+        // The leading release below is defensive cleanup for that existing
+        // stuck state; the one in the failure path prevents it recurring.
+        _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
+
         try await expectOK("ReleaseOn(half)",
-            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1]))
+            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
         try? await Task.sleep(nanoseconds: 300_000_000)
-        var fullPressAttempt = 0
-        while true {
-            fullPressAttempt += 1
-            let result = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2])
-            if result.response == nil || result.response?.code == PTPResponseCode.ok {
-                break
-            }
-            if result.response?.code == PTPResponseCode.deviceBusy, fullPressAttempt < 10 {
-                log("ReleaseOn(full) busy (attempt \(fullPressAttempt)), retrying")
-                try? await Task.sleep(nanoseconds: 200_000_000)
-                continue
-            }
-            log(String(format: "ReleaseOn(full) failed: 0x%04X", result.response?.code ?? 0))
-            throw EOSError.badResponse(operation: "ReleaseOn(full)", code: result.response?.code)
+
+        let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0])
+        if let code = fullPress.response?.code, code != PTPResponseCode.ok {
+            _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
+            log(String(format: "ReleaseOn(full) failed: 0x%04X — half-press released", code))
+            throw EOSError.badResponse(operation: "ReleaseOn(full)", code: code)
         }
+
         try await expectOK("ReleaseOff(full)",
             await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2]))
         try await expectOK("ReleaseOff(half)",
