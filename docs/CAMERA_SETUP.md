@@ -67,3 +67,11 @@ same root cause as above. Disconnect, power-cycle the camera, reconnect.
 scan link:** confirm the camera is in venue Wi-Fi mode (§3), not its own
 private AP — the two networks aren't bridged, so a phone joined to the
 camera's own AP can't be reached by anyone else.
+
+**Mid-event Wi-Fi drop — app recovers to the connect screen but won't
+reconnect no matter how many times you tap Connect:** expected, not a bug.
+When the camera's own Wi-Fi session drops, its firmware fully exits Remote
+control (EOS Utility) mode rather than just losing the link — it needs to be
+manually re-armed **on the camera itself** (Wi-Fi menu → Remote control (EOS
+Utility) again) before any client, this app included, can reconnect.
+Attendant needs to walk back to the camera, not just retry in the app.
