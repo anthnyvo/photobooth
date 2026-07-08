@@ -8,6 +8,7 @@ public enum BoothStep: Equatable {
     case eventPicker
     case connecting
     case attract
+    case readyToShoot
     case countdown(Int)
     case capturing
     case review(URL)
@@ -126,12 +127,21 @@ public final class BoothViewModel: ObservableObject {
     /// config only controls whether strip mode is *offered* at all
     /// (AttractView shows a Single/Strip choice when config.strip.enabled,
     /// otherwise just today's single tap-to-start); it doesn't force every
-    /// guest into the same layout.
+    /// guest into the same layout. Doesn't start the countdown directly —
+    /// moves to a "Touch to Shoot" screen first so the guest has a moment to
+    /// pose instead of the countdown firing the instant they pick a mode.
     public func tapToStart(wantsStrip: Bool = false) {
         guard step == .attract else { return }
         returnToAttractTask?.cancel()
         EventStorage.shared.recordGuestSession(eventId: config.eventId)
         sessionShotCount = wantsStrip ? max(2, config.strip.shotCount) : 1
+        step = .readyToShoot
+    }
+
+    /// The actual "go" — called from the Touch to Shoot screen.
+    public func confirmReadyToShoot() {
+        guard step == .readyToShoot else { return }
+        returnToAttractTask?.cancel()
         beginCountdown()
     }
 
