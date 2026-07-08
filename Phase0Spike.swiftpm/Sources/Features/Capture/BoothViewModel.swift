@@ -123,12 +123,32 @@ public final class BoothViewModel: ObservableObject {
         guard let camera else { return }
         step = .capturing
         do {
-            let data = try await camera.capturePhoto()
+            // The underlying NWConnection reads inside capturePhoto() have no
+            // timeout of their own — if Wi-Fi drops mid-capture (not a clean
+            // disconnect, just goes out of range), a read can hang forever
+            // waiting for bytes that will never arrive. Without this, the
+            // white "flash" overlay (.capturing state) never clears — the
+            // exact "stuck on a white screen" symptom found testing a
+            // mid-capture Wi-Fi drop. 20s is generous over the normal ~4s
+            // round trip.
+            let data = try await withTimeout(seconds: 20) { try await camera.capturePhoto() }
             let url = try EventStorage.shared.savePhoto(data, eventId: config.eventId)
             step = .review(url)
         } catch {
             lastError = "Capture failed: \(error)"
             step = .attract
+            // A hung/failed capture usually means the connection itself is
+            // dead (that's what caused the hang in the first place) —
+            // disconnecting unblocks the leaked read (NWConnection.cancel()
+            // completes pending receives with an error) and self-heals by
+            // reconnecting with the same IP, rather than leaving the booth
+            // silently wedged until an attendant notices and manually hits
+            // Connect again.
+            transport?.disconnect()
+            step = .connecting
+            connectionMessage = "Connection lost — reconnecting…"
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            connectCamera()
         }
     }
 
