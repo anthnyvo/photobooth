@@ -134,8 +134,18 @@ public actor EOSCamera {
         // 0xD1B3 set this code used to send has no confirmed purpose and
         // was a likely cause of the camera never actually starting the
         // stream (GetViewFinderData returned 0 bytes / OK indefinitely).
-        // 3 = cameraAndHost, so the camera's own screen stays live too.
-        try await setProperty(CanonProp.evfOutputDevice, 3, name: "EVFOutputDevice=cameraAndHost")
+        // Was 3 (cameraAndHost, dual-output) — hardware evidence: with that
+        // value, AF stopped working entirely while the remote session was
+        // connected, for BOTH remote presses and the camera's own physical
+        // shutter button (confirmed: physical half-press couldn't focus
+        // either, only while this session was active). That's session/state
+        // scoped, not specific to our press commands, and dual-routing live
+        // view to both camera screen and host simultaneously is the one
+        // untested EVFOutputDevice value between the two that were already
+        // ruled out (3 and 0/off). 2 = PC/host-only; the camera's own screen
+        // goes dark, but the sensor stream (which Dual Pixel AF runs
+        // through on this mirrorless body) stays fully under host control.
+        try await setProperty(CanonProp.evfOutputDevice, 2, name: "EVFOutputDevice=PCOnly")
         // Settle time: the sensor/imaging pipeline needs a moment to actually
         // start streaming after this property lands. Polling immediately (and
         // then hammering the body every ~50ms) is a documented way to keep a
