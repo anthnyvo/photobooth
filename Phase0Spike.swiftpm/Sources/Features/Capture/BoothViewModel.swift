@@ -198,21 +198,30 @@ public final class BoothViewModel: ObservableObject {
             // mid-capture Wi-Fi drop. 20s is generous over the normal ~4s
             // round trip.
             return try await withTimeout(seconds: 20) { try await camera.capturePhoto() }
-        } catch {
-            lastError = "Capture failed: \(error)"
+        } catch is TimeoutError {
+            // A genuine hang — the connection itself is dead (that's what
+            // caused the hang in the first place). Disconnecting unblocks the
+            // leaked read (NWConnection.cancel() completes pending receives
+            // with an error) and self-heals by reconnecting with the same
+            // IP, rather than leaving the booth silently wedged until an
+            // attendant notices and manually hits Connect again.
+            lastError = "Capture failed: connection timed out"
             step = .attract
-            // A hung/failed capture usually means the connection itself is
-            // dead (that's what caused the hang in the first place) —
-            // disconnecting unblocks the leaked read (NWConnection.cancel()
-            // completes pending receives with an error) and self-heals by
-            // reconnecting with the same IP, rather than leaving the booth
-            // silently wedged until an attendant notices and manually hits
-            // Connect again.
             await transport?.disconnect()
             step = .connecting
             connectionMessage = "Connection lost — reconnecting…"
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             connectCamera()
+            return nil
+        } catch {
+            // The camera responded — it just couldn't complete the shot,
+            // most often a failed autofocus lock rejecting the shutter
+            // release (EOSError.badResponse). The connection is fine, so
+            // don't tear it down — that was the actual bug: any capture
+            // error, AF failures included, was triggering a full
+            // disconnect/reconnect meant only for a dead connection.
+            lastError = "Couldn't take the photo — try again"
+            step = .attract
             return nil
         }
     }
