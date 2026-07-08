@@ -16,6 +16,7 @@ struct AdminView: View {
     @State private var backgroundColor: Color = .black
     @State private var countdownSeconds: Int = 5
     @State private var airdrop = true
+    @State private var qrGallery = true
     @State private var printEnabled = true
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
@@ -56,7 +57,15 @@ struct AdminView: View {
 
                 Section("Sharing") {
                     Toggle("AirDrop", isOn: $airdrop)
+                    Toggle("QR Code", isOn: $qrGallery)
                     Toggle("Print", isOn: $printEnabled)
+                }
+                if qrGallery {
+                    Section {
+                        Text("QR sharing needs the camera joined to the venue's own Wi-Fi (not its own private network) so guest phones can reach this device.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let saveMessage {
@@ -88,6 +97,7 @@ struct AdminView: View {
         backgroundColor = Color(hex: current.colors.backgroundHex) ?? .black
         countdownSeconds = current.countdownSeconds
         airdrop = current.share.airdrop
+        qrGallery = current.share.qrGallery
         printEnabled = current.print.enabled
     }
 
@@ -98,7 +108,7 @@ struct AdminView: View {
             branding: branding,
             colors: .init(primaryHex: primaryColor.hexString, backgroundHex: backgroundColor.hexString),
             countdownSeconds: countdownSeconds,
-            share: .init(airdrop: airdrop),
+            share: .init(airdrop: airdrop, qrGallery: qrGallery),
             print: .init(enabled: printEnabled)
         )
         do {

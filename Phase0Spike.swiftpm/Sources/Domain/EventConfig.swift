@@ -23,7 +23,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         public var sms: Bool
         public var email: Bool
 
-        public init(airdrop: Bool = true, qrGallery: Bool = false, sms: Bool = false, email: Bool = false) {
+        public init(airdrop: Bool = true, qrGallery: Bool = true, sms: Bool = false, email: Bool = false) {
             self.airdrop = airdrop
             self.qrGallery = qrGallery
             self.sms = sms
