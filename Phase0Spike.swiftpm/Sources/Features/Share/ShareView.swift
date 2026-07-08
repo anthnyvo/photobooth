@@ -91,7 +91,12 @@ struct ShareView: View {
         qrURL = nil
         qrError = nil
         showingQR = true
-        Task {
+        // Explicit @MainActor: BoothViewModel and this view's state updates
+        // need to land on the main actor to actually trigger a SwiftUI
+        // redraw. Plain `Task { }` runs detached from any actor, so the
+        // qrImage/qrURL/qrError writes below could complete off-main and
+        // silently never repaint the sheet (spinner stuck forever).
+        Task { @MainActor in
             do {
                 try await LocalPhotoServer.shared.start()
                 guard let url = await LocalPhotoServer.shared.url(forPhoto: photoURL) else {
