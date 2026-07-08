@@ -6,7 +6,15 @@ import PhotosUI
 /// writes config.json + copies the logo into that event's asset folder —
 /// no hand-written JSON, no file edits on event day.
 struct AdminView: View {
+    enum Mode: Equatable {
+        /// Opened from the event picker's "+ New Event" — starts blank.
+        case create
+        /// Opened from ConnectView's "Event Setup" — edits the active event.
+        case edit
+    }
+
     @ObservedObject var model: BoothViewModel
+    var mode: Mode = .edit
     @Environment(\.dismiss) private var dismiss
 
     @State private var eventId: String = ""
@@ -17,14 +25,26 @@ struct AdminView: View {
     @State private var countdownSeconds: Int = 5
     @State private var airdrop = true
     @State private var qrGallery = true
+    @State private var email = false
     @State private var printEnabled = true
+    @State private var limitPrints = false
+    @State private var printLimitCount = 1
+    @State private var overlayEnabled = false
+    @State private var stripEnabled = false
+    @State private var stripShotCount = 3
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
+    @State private var selectedOverlay: PhotosPickerItem?
+    @State private var overlayData: Data?
     @State private var saveMessage: String?
 
     var body: some View {
         NavigationStack {
             Form {
+                if mode == .edit {
+                    statusSection
+                }
+
                 Section("Event") {
                     TextField("Event ID (no spaces)", text: $eventId)
                         #if os(iOS)
@@ -55,10 +75,33 @@ struct AdminView: View {
                     Stepper("Countdown: \(countdownSeconds)s", value: $countdownSeconds, in: 3...10)
                 }
 
+                Section("Photo Strip") {
+                    Toggle("Enable photo strip", isOn: $stripEnabled)
+                    if stripEnabled {
+                        Stepper("Shots: \(stripShotCount)", value: $stripShotCount, in: 2...4)
+                    }
+                }
+
+                Section("Overlay / Frame") {
+                    Toggle("Burn overlay into photo", isOn: $overlayEnabled)
+                    if overlayEnabled {
+                        PhotosPicker("Choose overlay image", selection: $selectedOverlay, matching: .images)
+                        if let overlayData, let uiImage = UIImage(data: overlayData) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 80)
+                        }
+                        Text("Author the overlay to match the current layout's aspect ratio (single photo vs. strip).")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section("Sharing") {
                     Toggle("AirDrop", isOn: $airdrop)
                     Toggle("QR Code", isOn: $qrGallery)
-                    Toggle("Print", isOn: $printEnabled)
+                    Toggle("Email", isOn: $email)
                 }
                 if qrGallery {
                     Section {
@@ -68,11 +111,21 @@ struct AdminView: View {
                     }
                 }
 
+                Section("Printing") {
+                    Toggle("Enabled", isOn: $printEnabled)
+                    if printEnabled {
+                        Toggle("Limit prints per guest", isOn: $limitPrints)
+                        if limitPrints {
+                            Stepper("Limit: \(printLimitCount)", value: $printLimitCount, in: 1...10)
+                        }
+                    }
+                }
+
                 if let saveMessage {
                     Text(saveMessage).foregroundStyle(.green)
                 }
             }
-            .navigationTitle("Event Setup")
+            .navigationTitle(mode == .create ? "New Event" : "Event Setup")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -84,7 +137,42 @@ struct AdminView: View {
             .onChange(of: selectedLogo) { _, item in
                 Task { logoData = try? await item?.loadTransferable(type: Data.self) }
             }
-            .onAppear(perform: loadCurrent)
+            .onChange(of: selectedOverlay) { _, item in
+                Task { overlayData = try? await item?.loadTransferable(type: Data.self) }
+            }
+            .onAppear {
+                if mode == .edit {
+                    loadCurrent()
+                }
+            }
+        }
+    }
+
+    /// Live attendant status + running totals for the *active* event — kept
+    /// separate from whatever eventId is being typed into the form above, so
+    /// editing the ID field doesn't make these numbers flicker to zero.
+    private var statusSection: some View {
+        let activeId = model.config.eventId
+        let photos = EventStorage.shared.listPhotos(eventId: activeId).count
+        let prints = EventStorage.shared.printCount(eventId: activeId)
+        let guests = EventStorage.shared.guestSessionCount(eventId: activeId)
+        let storageGB = EventStorage.shared.remainingCapacityGB()
+
+        return Section("Status") {
+            LabeledContent("Camera", value: cameraConnected ? "Connected" : "Not connected")
+            LabeledContent("Photos taken", value: "\(photos)")
+            LabeledContent("Prints", value: "\(prints)")
+            LabeledContent("Guest sessions", value: "\(guests)")
+            LabeledContent("Storage free", value: storageGB.map { String(format: "%.1f GB", $0) } ?? "—")
+        }
+    }
+
+    private var cameraConnected: Bool {
+        switch model.step {
+        case .eventPicker, .connecting:
+            return false
+        default:
+            return true
         }
     }
 
@@ -98,7 +186,13 @@ struct AdminView: View {
         countdownSeconds = current.countdownSeconds
         airdrop = current.share.airdrop
         qrGallery = current.share.qrGallery
+        email = current.share.email
         printEnabled = current.print.enabled
+        limitPrints = current.print.limitPerGuest != nil
+        printLimitCount = current.print.limitPerGuest ?? 1
+        overlayEnabled = current.overlay.enabled
+        stripEnabled = current.strip.enabled
+        stripShotCount = current.strip.shotCount
     }
 
     private func save() {
@@ -108,8 +202,10 @@ struct AdminView: View {
             branding: branding,
             colors: .init(primaryHex: primaryColor.hexString, backgroundHex: backgroundColor.hexString),
             countdownSeconds: countdownSeconds,
-            share: .init(airdrop: airdrop, qrGallery: qrGallery),
-            print: .init(enabled: printEnabled)
+            share: .init(airdrop: airdrop, qrGallery: qrGallery, email: email),
+            print: .init(enabled: printEnabled, limitPerGuest: limitPrints ? printLimitCount : nil),
+            overlay: .init(enabled: overlayEnabled, assetName: overlayEnabled ? "overlay.png" : nil),
+            strip: .init(enabled: stripEnabled, shotCount: stripShotCount)
         )
         do {
             try EventStorage.shared.createEvent(config)
@@ -117,6 +213,9 @@ struct AdminView: View {
                 let filename = try EventStorage.shared.importLogoData(logoData, eventId: eventId)
                 config.logoAssetName = filename
                 try EventStorage.shared.save(config)
+            }
+            if overlayEnabled, let overlayData {
+                _ = try EventStorage.shared.importLogoData(overlayData, eventId: eventId, filename: "overlay.png")
             }
             model.reloadConfig()
             saveMessage = "Saved — will load on next connect"

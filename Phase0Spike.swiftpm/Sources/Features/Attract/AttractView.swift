@@ -36,30 +36,47 @@ struct AttractView: View {
                     .shadow(color: .black.opacity(0.6), radius: 8)
                 Spacer()
 
-                // Shutter-ring start control: outer hairline ring, accent
-                // inner disc — reads as a camera control, not a web button.
-                Button(action: model.tapToStart) {
-                    VStack(spacing: 18) {
-                        ZStack {
-                            Circle()
-                                .fill(Chassis.panel.opacity(0.85))
-                            Circle()
-                                .strokeBorder(Chassis.hairline, lineWidth: 1)
-                            Circle()
-                                .strokeBorder(.white.opacity(0.8), lineWidth: 3)
-                                .padding(10)
-                            Circle()
-                                .fill(theme.primary)
-                                .padding(18)
+                if model.config.strip.enabled {
+                    // Strip mode is available for this event but shouldn't
+                    // force every guest into it — let each guest pick per
+                    // session instead of baking one layout into the config.
+                    HStack(spacing: 40) {
+                        DialButton(label: "Single Photo", systemImage: "camera.fill", accent: theme.primary, diameter: 96) {
+                            model.tapToStart(wantsStrip: false)
                         }
-                        .frame(width: 108, height: 108)
-                        .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
-
-                        ChassisLabel(text: "Tap to Start")
+                        DialButton(label: "Photo Strip", systemImage: "rectangle.grid.1x2.fill", accent: theme.primary, diameter: 96) {
+                            model.tapToStart(wantsStrip: true)
+                        }
                     }
+                    .padding(.bottom, 56)
+                } else {
+                    // Shutter-ring start control: outer hairline ring, accent
+                    // inner disc — reads as a camera control, not a web button.
+                    Button {
+                        model.tapToStart()
+                    } label: {
+                        VStack(spacing: 18) {
+                            ZStack {
+                                Circle()
+                                    .fill(Chassis.panel.opacity(0.85))
+                                Circle()
+                                    .strokeBorder(Chassis.hairline, lineWidth: 1)
+                                Circle()
+                                    .strokeBorder(.white.opacity(0.8), lineWidth: 3)
+                                    .padding(10)
+                                Circle()
+                                    .fill(theme.primary)
+                                    .padding(18)
+                            }
+                            .frame(width: 108, height: 108)
+                            .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
+
+                            ChassisLabel(text: "Tap to Start")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 56)
                 }
-                .buttonStyle(.plain)
-                .padding(.bottom, 56)
             }
 
             if let error = model.lastError {
@@ -76,6 +93,12 @@ struct AttractView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { model.tapToStart() }
+        .onTapGesture {
+            // Tap-anywhere is a shortcut for the single shutter button; once
+            // strip mode is offered, starting requires an explicit Single/
+            // Strip choice instead, so this no-ops there.
+            guard !model.config.strip.enabled else { return }
+            model.tapToStart()
+        }
     }
 }

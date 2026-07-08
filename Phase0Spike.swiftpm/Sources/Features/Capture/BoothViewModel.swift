@@ -5,8 +5,10 @@ import SwiftUI
 /// SpikeViewModel — this one drives the actual booth experience, reusing the
 /// same CameraKit transport/protocol layer proven out in Phase 0.
 public enum BoothStep: Equatable {
+    case eventPicker
     case connecting
     case attract
+    case readyToShoot
     case countdown(Int)
     case capturing
     case review(URL)
@@ -15,18 +17,24 @@ public enum BoothStep: Equatable {
 
 @MainActor
 public final class BoothViewModel: ObservableObject {
-    @Published public private(set) var step: BoothStep = .connecting
+    @Published public private(set) var step: BoothStep = .eventPicker
     @Published public private(set) var config: EventConfig
     @Published public var liveViewImage: UIImage?
     @Published public var cameraIPText: String = "192.168.1.2"
     @Published public private(set) var connectionMessage: String = "Enter the camera's IP and connect"
     @Published public private(set) var lastError: String?
+    /// Non-nil only mid-strip-sequence, so CaptureView can show "Shot 2 of 3"
+    /// — nil (and ignored) for a normal single-shot capture.
+    @Published public private(set) var stripProgress: (shot: Int, total: Int)?
 
     private var transport: PTPIPTransport?
     private var camera: EOSCamera?
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
     private var returnToAttractTask: Task<Void, Never>?
+    /// Set once per guest by tapToStart(wantsStrip:) and reused by retake()
+    /// so a retake redoes the same layout the guest originally picked.
+    private var sessionShotCount = 1
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
         self.config = config
@@ -34,6 +42,19 @@ public final class BoothViewModel: ObservableObject {
 
     public func reloadConfig() {
         config = EventStorage.shared.loadCurrentOrDefault()
+    }
+
+    // MARK: - Event picker (home screen)
+
+    /// Switches the active event and proceeds to the camera-connect step.
+    /// Loading failure (corrupt/missing config.json) is treated as "ignore
+    /// this row" rather than crashing the picker — the event just won't
+    /// switch and the attendant can try another or create a new one.
+    public func selectEvent(_ eventId: String) {
+        guard let selected = try? EventStorage.shared.load(eventId) else { return }
+        EventStorage.shared.setCurrentEventId(eventId)
+        config = selected
+        step = .connecting
     }
 
     // MARK: - Connection (attendant setup step)
@@ -102,25 +123,70 @@ public final class BoothViewModel: ObservableObject {
 
     // MARK: - Guest flow
 
-    public func tapToStart() {
+    /// `wantsStrip` is the guest's choice at the attract screen — the event
+    /// config only controls whether strip mode is *offered* at all
+    /// (AttractView shows a Single/Strip choice when config.strip.enabled,
+    /// otherwise just today's single tap-to-start); it doesn't force every
+    /// guest into the same layout. Doesn't start the countdown directly —
+    /// moves to a "Touch to Shoot" screen first so the guest has a moment to
+    /// pose instead of the countdown firing the instant they pick a mode.
+    public func tapToStart(wantsStrip: Bool = false) {
         guard step == .attract else { return }
+        returnToAttractTask?.cancel()
+        EventStorage.shared.recordGuestSession(eventId: config.eventId)
+        sessionShotCount = wantsStrip ? max(2, config.strip.shotCount) : 1
+        step = .readyToShoot
+    }
+
+    /// The actual "go" — called from the Touch to Shoot screen.
+    public func confirmReadyToShoot() {
+        guard step == .readyToShoot else { return }
         returnToAttractTask?.cancel()
         beginCountdown()
     }
 
+    /// Kicks off `sessionShotCount` shots in sequence (1 for a normal photo,
+    /// several for a strip). Used by both tapToStart() and retake() — a
+    /// retake redoes the whole sequence with the same layout the guest
+    /// originally chose, matching the pre-strip retake semantics of "start
+    /// over" 1:1.
     private func beginCountdown() {
-        let total = max(1, config.countdownSeconds)
-        Task {
-            for remaining in stride(from: total, through: 1, by: -1) {
-                step = .countdown(remaining)
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
-            await performCapture()
-        }
+        Task { await captureSequence() }
     }
 
-    private func performCapture() async {
-        guard let camera else { return }
+    private func captureSequence() async {
+        let totalShots = sessionShotCount
+        var shots: [Data] = []
+        for shotIndex in 1...totalShots {
+            stripProgress = totalShots > 1 ? (shotIndex, totalShots) : nil
+            guard let data = await runCountdownAndCapture() else {
+                // Error already reported and state already transitioned
+                // (attract or reconnecting) inside runCountdownAndCapture.
+                stripProgress = nil
+                return
+            }
+            shots.append(data)
+            if shotIndex < totalShots {
+                try? await Task.sleep(nanoseconds: 800_000_000)
+            }
+        }
+        stripProgress = nil
+        finishCapture(shots: shots)
+    }
+
+    /// One countdown + one capture, returning the raw JPEG bytes. Extracted
+    /// near-verbatim from the original single-shot performCapture() — same
+    /// 20s timeout and same Wi-Fi-drop disconnect/reconnect recovery, just
+    /// returning Data instead of saving/transitioning directly, so it can be
+    /// called once (normal) or several times in a row (strip mode).
+    private func runCountdownAndCapture() async -> Data? {
+        let total = max(1, config.countdownSeconds)
+        for remaining in stride(from: total, through: 1, by: -1) {
+            step = .countdown(remaining)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+
+        guard let camera else { return nil }
         step = .capturing
         do {
             // The underlying NWConnection reads inside capturePhoto() have no
@@ -131,24 +197,63 @@ public final class BoothViewModel: ObservableObject {
             // exact "stuck on a white screen" symptom found testing a
             // mid-capture Wi-Fi drop. 20s is generous over the normal ~4s
             // round trip.
-            let data = try await withTimeout(seconds: 20) { try await camera.capturePhoto() }
-            let url = try EventStorage.shared.savePhoto(data, eventId: config.eventId)
-            step = .review(url)
-        } catch {
-            lastError = "Capture failed: \(error)"
+            return try await withTimeout(seconds: 20) { try await camera.capturePhoto() }
+        } catch is TimeoutError {
+            // A genuine hang — the connection itself is dead (that's what
+            // caused the hang in the first place). Disconnecting unblocks the
+            // leaked read (NWConnection.cancel() completes pending receives
+            // with an error) and self-heals by reconnecting with the same
+            // IP, rather than leaving the booth silently wedged until an
+            // attendant notices and manually hits Connect again.
+            lastError = "Capture failed: connection timed out"
             step = .attract
-            // A hung/failed capture usually means the connection itself is
-            // dead (that's what caused the hang in the first place) —
-            // disconnecting unblocks the leaked read (NWConnection.cancel()
-            // completes pending receives with an error) and self-heals by
-            // reconnecting with the same IP, rather than leaving the booth
-            // silently wedged until an attendant notices and manually hits
-            // Connect again.
             await transport?.disconnect()
             step = .connecting
             connectionMessage = "Connection lost — reconnecting…"
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             connectCamera()
+            return nil
+        } catch {
+            // The camera responded — it just couldn't complete the shot,
+            // most often a failed autofocus lock rejecting the shutter
+            // release (EOSError.badResponse). The connection is fine, so
+            // don't tear it down — that was the actual bug: any capture
+            // error, AF failures included, was triggering a full
+            // disconnect/reconnect meant only for a dead connection.
+            lastError = "Couldn't take the photo — try again"
+            step = .attract
+            return nil
+        }
+    }
+
+    /// Composites multiple shots into a strip (or passes a single shot
+    /// through unchanged), burns in the overlay if configured, and saves —
+    /// same end state (`.review(url)`) as the original single-shot path.
+    /// The actual pixel work runs off the main actor: decoding and drawing
+    /// several full-resolution camera JPEGs into one canvas is real CPU work,
+    /// and running it synchronously here (BoothViewModel is @MainActor)
+    /// blocked the UI thread long enough to risk a watchdog termination —
+    /// the crash seen right after the last shot in a strip.
+    private func finishCapture(shots: [Data]) {
+        guard let firstShot = shots.first else { return }
+        let currentConfig = config
+        Task {
+            let branded = await Task.detached(priority: .userInitiated) {
+                let composited: Data
+                if shots.count > 1 {
+                    composited = PhotoCompositor.compositeStrip(shots) ?? firstShot
+                } else {
+                    composited = firstShot
+                }
+                return PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+            }.value
+            do {
+                let url = try EventStorage.shared.savePhoto(branded, eventId: currentConfig.eventId)
+                step = .review(url)
+            } catch {
+                lastError = "Save failed: \(error)"
+                step = .attract
+            }
         }
     }
 

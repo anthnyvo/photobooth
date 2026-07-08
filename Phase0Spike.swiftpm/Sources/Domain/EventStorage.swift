@@ -130,4 +130,46 @@ public final class EventStorage {
         (try? fileManager.contentsOfDirectory(at: photosDirectory(eventId), includingPropertiesForKeys: [.creationDateKey]))?
             .sorted { ($0.lastPathComponent) > ($1.lastPathComponent) } ?? []
     }
+
+    // MARK: - Per-event counters
+
+    /// Running totals for the attendant status panel — keyed per event so
+    /// switching events (via the home screen) doesn't mix up one client's
+    /// numbers with another's.
+    public func recordPrint(eventId: String) {
+        let key = printCountKey(eventId)
+        UserDefaults.standard.set(printCount(eventId: eventId) + 1, forKey: key)
+    }
+
+    public func printCount(eventId: String) -> Int {
+        UserDefaults.standard.integer(forKey: printCountKey(eventId))
+    }
+
+    public func recordGuestSession(eventId: String) {
+        let key = guestSessionCountKey(eventId)
+        UserDefaults.standard.set(guestSessionCount(eventId: eventId) + 1, forKey: key)
+    }
+
+    public func guestSessionCount(eventId: String) -> Int {
+        UserDefaults.standard.integer(forKey: guestSessionCountKey(eventId))
+    }
+
+    private func printCountKey(_ eventId: String) -> String {
+        "com.anthonyvo.photobooth.printCount.\(eventId)"
+    }
+
+    private func guestSessionCountKey(_ eventId: String) -> String {
+        "com.anthonyvo.photobooth.guestSessionCount.\(eventId)"
+    }
+
+    /// Free space on the device, for the attendant status panel — same
+    /// volume the Documents folder (and so every event's photos) lives on.
+    public func remainingCapacityGB() -> Double? {
+        let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        guard let values = try? docs.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let bytes = values.volumeAvailableCapacityForImportantUsage else {
+            return nil
+        }
+        return Double(bytes) / 1_000_000_000
+    }
 }
