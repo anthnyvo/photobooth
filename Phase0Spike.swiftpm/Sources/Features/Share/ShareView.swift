@@ -10,10 +10,11 @@ struct ShareView: View {
     @StateObject private var printJob = PrintJob()
 
     var body: some View {
+        let uiImage = UIImage(contentsOfFile: photoURL.path)
         ZStack {
             theme.background.ignoresSafeArea()
             VStack(spacing: 28) {
-                if let uiImage = UIImage(contentsOfFile: photoURL.path) {
+                if let uiImage {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
@@ -27,8 +28,16 @@ struct ShareView: View {
 
                 HStack(spacing: 24) {
                     if model.config.share.airdrop {
-                        ShareLink(item: photoURL) {
-                            shareButton(label: "AirDrop", systemImage: "wifi")
+                        // A bare file URL doesn't reliably present as an
+                        // actual photo to third-party share targets (WhatsApp
+                        // in particular silently drops it) — sharing the
+                        // Image itself with an explicit JPEG-backed preview
+                        // is what makes both AirDrop and other apps treat it
+                        // as real image data instead of a generic file link.
+                        if let uiImage {
+                            ShareLink(item: Image(uiImage: uiImage), preview: SharePreview("Photo", image: Image(uiImage: uiImage))) {
+                                shareButton(label: "AirDrop", systemImage: "wifi")
+                            }
                         }
                     }
                     if model.config.print.enabled {
