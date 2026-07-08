@@ -111,13 +111,23 @@ struct ShareView: View {
         }
     }
 
+    /// Icon-over-label, not a horizontal Label — three side-by-side pills
+    /// wide enough for "AirDrop"/"QR Code"/"Print" at a readable font don't
+    /// fit an HStack on a phone-width screen; the HStack compressed each
+    /// pill down to where the text wrapped one character per line. This
+    /// layout stays narrow and readable regardless of label length.
     private func shareButton(label: String, systemImage: String) -> some View {
-        Label(label, systemImage: systemImage)
-            .font(.title2.bold())
-            .padding(.horizontal, 28)
-            .padding(.vertical, 18)
-            .background(theme.primary)
-            .foregroundStyle(.white)
-            .clipShape(Capsule())
+        VStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.title2)
+            Text(label)
+                .font(.caption.bold())
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(width: 84, height: 84)
+        .background(theme.primary)
+        .foregroundStyle(.white)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 }
