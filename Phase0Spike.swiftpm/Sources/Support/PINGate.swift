@@ -29,7 +29,7 @@ struct PINGate<Content: View>: View {
                             .fill(Chassis.card.opacity(0.86))
                         Circle()
                             .strokeBorder(Chassis.hairline, lineWidth: 1)
-                        Image(systemName: "lock.fill")
+                        Image(systemName: "lock")
                             .font(.system(size: 30, weight: .medium))
                             .foregroundStyle(Chassis.textPrimary)
                     }

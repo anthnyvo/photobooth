@@ -245,7 +245,8 @@ public final class BoothViewModel: ObservableObject {
                 } else {
                     composited = firstShot
                 }
-                return PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+                let branded = PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+                return PhotoCompositor.addPolaroidFrame(to: branded)
             }.value
             do {
                 let url = try EventStorage.shared.savePhoto(branded, eventId: currentConfig.eventId)

@@ -46,7 +46,7 @@ struct ShareView: View {
                         // as real image data instead of a generic file link.
                         if let uiImage {
                             ShareLink(item: Image(uiImage: uiImage), preview: SharePreview("Photo", image: Image(uiImage: uiImage))) {
-                                dialFace(label: "AirDrop", systemImage: "wifi")
+                                dialFace(label: "AirDrop", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.plain)
                         }

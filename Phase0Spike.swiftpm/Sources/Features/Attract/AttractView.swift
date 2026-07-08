@@ -41,10 +41,10 @@ struct AttractView: View {
                     // force every guest into it — let each guest pick per
                     // session instead of baking one layout into the config.
                     HStack(spacing: 40) {
-                        DialButton(label: "Single Photo", systemImage: "camera.fill", accent: theme.primary, diameter: 96) {
+                        DialButton(label: "Single Photo", systemImage: "camera", accent: theme.primary, diameter: 96) {
                             model.tapToStart(wantsStrip: false)
                         }
-                        DialButton(label: "Photo Strip", systemImage: "rectangle.grid.1x2.fill", accent: theme.primary, diameter: 96) {
+                        DialButton(label: "Photo Strip", systemImage: "photo.stack.fill", accent: theme.primary, diameter: 96) {
                             model.tapToStart(wantsStrip: true)
                         }
                     }

@@ -63,6 +63,31 @@ enum PhotoCompositor {
         }
         return composited.jpegData(compressionQuality: 0.9)
     }
+
+    /// Wraps the finished photo (single shot or already-composited strip) in
+    /// a classic Polaroid-style white border — thin on the top/sides,
+    /// noticeably thicker along the bottom (the traditional caption strip).
+    /// Applied last, after overlay/strip compositing, so every saved photo
+    /// gets the same physical-print look wherever it ends up: review,
+    /// share, or print.
+    static func addPolaroidFrame(to photoData: Data) -> Data {
+        guard let image = UIImage(data: photoData) else { return photoData }
+        let sideBorder = image.size.width * 0.045
+        let topBorder = sideBorder
+        let bottomBorder = image.size.width * 0.16
+
+        let canvasSize = CGSize(
+            width: image.size.width + sideBorder * 2,
+            height: image.size.height + topBorder + bottomBorder
+        )
+        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        let framed = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: canvasSize))
+            image.draw(at: CGPoint(x: sideBorder, y: topBorder))
+        }
+        return framed.jpegData(compressionQuality: 0.92) ?? photoData
+    }
 }
 
 private extension UIImage {

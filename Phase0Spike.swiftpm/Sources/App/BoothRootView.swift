@@ -64,7 +64,7 @@ private struct ConnectView: View {
                         .fill(Chassis.card.opacity(0.86))
                     Circle()
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
-                    Image(systemName: "camera.fill")
+                    Image(systemName: "camera")
                         .font(.system(size: 40, weight: .medium))
                         .foregroundStyle(theme.primary)
                 }
