@@ -33,10 +33,18 @@ enum PhotoCompositor {
     /// common width (the narrowest shot, so nothing gets cropped) with a
     /// thin gap between frames. Returns nil only if none of the shots could
     /// be decoded — callers fall back to the first raw shot in that case.
+    ///
+    /// Each shot is downscaled before compositing: the EOS R's JPEGs are
+    /// several thousand pixels wide, and decoding + drawing 3-4 of them at
+    /// native resolution into one huge canvas is what was crashing this —
+    /// either an out-of-memory kill or a main-thread watchdog termination
+    /// from how long the render took. A strip is printed small, so there's
+    /// no quality reason to keep native resolution.
     static func compositeStrip(_ shots: [Data]) -> Data? {
-        let images = shots.compactMap { UIImage(data: $0) }
+        let maxShotWidth: CGFloat = 1200
+        let images = shots.compactMap { UIImage(data: $0)?.downscaled(maxWidth: maxShotWidth) }
         guard !images.isEmpty else { return nil }
-        guard images.count > 1 else { return images[0].jpegData(compressionQuality: 0.92) }
+        guard images.count > 1 else { return images[0].jpegData(compressionQuality: 0.9) }
 
         let stripWidth = images.map(\.size.width).min() ?? images[0].size.width
         let gap: CGFloat = stripWidth * 0.02
@@ -47,10 +55,25 @@ enum PhotoCompositor {
         let composited = renderer.image { _ in
             var y: CGFloat = 0
             for (image, height) in zip(images, scaledHeights) {
-                image.draw(in: CGRect(x: 0, y: y, width: stripWidth, height: height))
+                autoreleasepool {
+                    image.draw(in: CGRect(x: 0, y: y, width: stripWidth, height: height))
+                }
                 y += height + gap
             }
         }
-        return composited.jpegData(compressionQuality: 0.92)
+        return composited.jpegData(compressionQuality: 0.9)
+    }
+}
+
+private extension UIImage {
+    func downscaled(maxWidth: CGFloat) -> UIImage {
+        guard size.width > maxWidth else { return self }
+        let scale = maxWidth / size.width
+        let newSize = CGSize(width: maxWidth, height: size.height * scale)
+        return autoreleasepool {
+            UIGraphicsImageRenderer(size: newSize).image { _ in
+                self.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        }
     }
 }

@@ -31,6 +31,9 @@ public final class BoothViewModel: ObservableObject {
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
     private var returnToAttractTask: Task<Void, Never>?
+    /// Set once per guest by tapToStart(wantsStrip:) and reused by retake()
+    /// so a retake redoes the same layout the guest originally picked.
+    private var sessionShotCount = 1
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
         self.config = config
@@ -119,23 +122,30 @@ public final class BoothViewModel: ObservableObject {
 
     // MARK: - Guest flow
 
-    public func tapToStart() {
+    /// `wantsStrip` is the guest's choice at the attract screen — the event
+    /// config only controls whether strip mode is *offered* at all
+    /// (AttractView shows a Single/Strip choice when config.strip.enabled,
+    /// otherwise just today's single tap-to-start); it doesn't force every
+    /// guest into the same layout.
+    public func tapToStart(wantsStrip: Bool = false) {
         guard step == .attract else { return }
         returnToAttractTask?.cancel()
         EventStorage.shared.recordGuestSession(eventId: config.eventId)
+        sessionShotCount = wantsStrip ? max(2, config.strip.shotCount) : 1
         beginCountdown()
     }
 
-    /// Kicks off one shot (normal mode) or `config.strip.shotCount` shots in
-    /// sequence (strip mode). Used by both tapToStart() and retake() — a
-    /// retake redoes the whole sequence, matching the pre-strip retake
-    /// semantics of "start over" 1:1.
+    /// Kicks off `sessionShotCount` shots in sequence (1 for a normal photo,
+    /// several for a strip). Used by both tapToStart() and retake() — a
+    /// retake redoes the whole sequence with the same layout the guest
+    /// originally chose, matching the pre-strip retake semantics of "start
+    /// over" 1:1.
     private func beginCountdown() {
         Task { await captureSequence() }
     }
 
     private func captureSequence() async {
-        let totalShots = config.strip.enabled ? max(2, config.strip.shotCount) : 1
+        let totalShots = sessionShotCount
         var shots: [Data] = []
         for shotIndex in 1...totalShots {
             stripProgress = totalShots > 1 ? (shotIndex, totalShots) : nil
@@ -200,21 +210,31 @@ public final class BoothViewModel: ObservableObject {
     /// Composites multiple shots into a strip (or passes a single shot
     /// through unchanged), burns in the overlay if configured, and saves —
     /// same end state (`.review(url)`) as the original single-shot path.
+    /// The actual pixel work runs off the main actor: decoding and drawing
+    /// several full-resolution camera JPEGs into one canvas is real CPU work,
+    /// and running it synchronously here (BoothViewModel is @MainActor)
+    /// blocked the UI thread long enough to risk a watchdog termination —
+    /// the crash seen right after the last shot in a strip.
     private func finishCapture(shots: [Data]) {
         guard let firstShot = shots.first else { return }
-        let composited: Data
-        if shots.count > 1 {
-            composited = PhotoCompositor.compositeStrip(shots) ?? firstShot
-        } else {
-            composited = firstShot
-        }
-        let branded = PhotoCompositor.applyOverlay(to: composited, config: config)
-        do {
-            let url = try EventStorage.shared.savePhoto(branded, eventId: config.eventId)
-            step = .review(url)
-        } catch {
-            lastError = "Save failed: \(error)"
-            step = .attract
+        let currentConfig = config
+        Task {
+            let branded = await Task.detached(priority: .userInitiated) {
+                let composited: Data
+                if shots.count > 1 {
+                    composited = PhotoCompositor.compositeStrip(shots) ?? firstShot
+                } else {
+                    composited = firstShot
+                }
+                return PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+            }.value
+            do {
+                let url = try EventStorage.shared.savePhoto(branded, eventId: currentConfig.eventId)
+                step = .review(url)
+            } catch {
+                lastError = "Save failed: \(error)"
+                step = .attract
+            }
         }
     }
 
