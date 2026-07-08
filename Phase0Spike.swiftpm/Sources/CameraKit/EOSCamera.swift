@@ -134,18 +134,13 @@ public actor EOSCamera {
         // 0xD1B3 set this code used to send has no confirmed purpose and
         // was a likely cause of the camera never actually starting the
         // stream (GetViewFinderData returned 0 bytes / OK indefinitely).
-        // Was 3 (cameraAndHost, dual-output) — hardware evidence: with that
-        // value, AF stopped working entirely while the remote session was
-        // connected, for BOTH remote presses and the camera's own physical
-        // shutter button (confirmed: physical half-press couldn't focus
-        // either, only while this session was active). That's session/state
-        // scoped, not specific to our press commands, and dual-routing live
-        // view to both camera screen and host simultaneously is the one
-        // untested EVFOutputDevice value between the two that were already
-        // ruled out (3 and 0/off). 2 = PC/host-only; the camera's own screen
-        // goes dark, but the sensor stream (which Dual Pixel AF runs
-        // through on this mirrorless body) stays fully under host control.
-        try await setProperty(CanonProp.evfOutputDevice, 2, name: "EVFOutputDevice=PCOnly")
+        // EVFOutputDevice was ruled out as the cause of the AF-blocked-while-
+        // connected bug: 0 (off), 2 (PC-only), and 3 (cameraAndHost) all
+        // behaved identically on hardware. Real cause was the second
+        // RemoteReleaseOn parameter forcing an AF attempt this manual-focus
+        // lens can never complete (see triggerShutter). Back to 3 so the
+        // camera's own screen shows live view too, for guest-facing framing.
+        try await setProperty(CanonProp.evfOutputDevice, 3, name: "EVFOutputDevice=cameraAndHost")
         // Settle time: the sensor/imaging pipeline needs a moment to actually
         // start streaming after this property lands. Polling immediately (and
         // then hammering the body every ~50ms) is a documented way to keep a
@@ -274,26 +269,29 @@ public actor EOSCamera {
         // it's a legacy PowerShot-era release, not implemented on EOS. EOS
         // bodies need the half-press (AF) + full-press pair instead,
         // matching libgphoto2's ptp2 camlib (camera_trigger_canon_eos_capture
-        // in library.c) and EOS Utility's own sequence. Confirmed against
-        // that source: RemoteReleaseOn takes 2 params (press-stage, 0) —
-        // the earlier single-param theory was a dead end, made no difference.
+        // in library.c) and EOS Utility's own sequence.
         //
         // Releasing half-press on a failed full-press (below) is real and
         // necessary — a leftover held half-press does make the body refuse
-        // every future full-press with DeviceBusy — but hardware testing
-        // showed it wasn't the whole story: even starting from a freshly
-        // released state, full-press still failed busy on the very first
-        // try. libgphoto2's reference never blindly sleeps between half and
-        // full press; it actively polls GetEvent watching for OLCInfoChanged
-        // (0xC1A5, carries focus-confirm data) before ever attempting full
-        // press. Our event loop was cancelled before this function even
-        // started, so that event — if the body sends it at all — was never
-        // once actually observed. Poll for it now instead of guessing a
-        // fixed delay.
+        // every future full-press with DeviceBusy — but wasn't the whole
+        // story either. The actual finding: with the remote session active,
+        // AF stopped working camera-wide — even the physical shutter button
+        // couldn't focus until disconnecting. That rules out EVFOutputDevice
+        // (tried 0, 2, and 3, all identical) and points at the second
+        // RemoteReleaseOn parameter instead: per Canon's EDSDK semantics,
+        // 0 = attempt AF, 1 = skip AF (instant press). This lens is a
+        // manual-focus adapter with no AF motor — sending 0 makes the body's
+        // firmware start an AF search that can never resolve, and it gets
+        // stuck waiting forever, which is exactly what blocks every press
+        // (remote or physical) afterward, not just ours. libgphoto2's
+        // reference always sends 0 here, but its manual-focus special-case
+        // never actually needed to change this param because the bodies it
+        // was tested against still complete a (failed) AF cycle fast; this
+        // adapter apparently never resolves the cycle at all.
         _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
 
         try await expectOK("ReleaseOn(half)",
-            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
+            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 1]))
 
         // FocusMode==3 means manual focus, in which case libgphoto2 never
         // waits for AF confirmation at all — worth knowing which mode we're
@@ -320,7 +318,7 @@ public actor EOSCamera {
         }
         log("half-press settle: OLCInfoChanged \(sawOLCInfo ? "seen" : "never seen")")
 
-        let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0])
+        let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 1])
         if let code = fullPress.response?.code, code != PTPResponseCode.ok {
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
             log(String(format: "ReleaseOn(full) failed: 0x%04X — half-press released", code))
