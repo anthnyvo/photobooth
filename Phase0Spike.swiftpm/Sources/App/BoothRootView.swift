@@ -57,31 +57,23 @@ private struct ConnectView: View {
 
     var body: some View {
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
             VStack(spacing: 24) {
                 ZStack {
                     Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Chassis.controlHighlight, Chassis.control],
-                                startPoint: .top, endPoint: .bottom
-                            )
-                        )
+                        .fill(Chassis.card.opacity(0.86))
                     Circle()
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
-                    Circle()
-                        .strokeBorder(Chassis.hairline, lineWidth: 1)
-                        .padding(8)
                     Image(systemName: "camera.fill")
                         .font(.system(size: 40, weight: .medium))
                         .foregroundStyle(theme.primary)
                 }
                 .frame(width: 116, height: 116)
-                .shadow(color: .black.opacity(0.5), radius: 12, y: 5)
+                .shadow(color: .black.opacity(0.4), radius: 12, y: 5)
 
                 Text(model.connectionMessage)
                     .font(.callout)
-                    .foregroundStyle(Chassis.textSecondary)
+                    .foregroundStyle(Chassis.textPrimary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
 
@@ -91,33 +83,22 @@ private struct ConnectView: View {
                         TextField("192.168.1.2", text: $model.cameraIPText)
                             .font(.system(.body, design: .monospaced))
                             .foregroundStyle(Chassis.textPrimary)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 14)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Chassis.control)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Chassis.hairline, lineWidth: 1)
-                            )
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .background(Capsule().fill(Chassis.control))
+                            .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
                             .frame(width: 190)
                             #if os(iOS)
                             .keyboardType(.numbersAndPunctuation)
                             .textInputAutocapitalization(.never)
                             #endif
                         Button(action: model.connectCamera) {
-                            ChassisLabel(text: "Connect", size: 12)
-                                .padding(.vertical, 14)
-                                .padding(.horizontal, 20)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(Chassis.control)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .strokeBorder(theme.primary.opacity(0.55), lineWidth: 1)
-                                )
+                            Text("Connect")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(Color.black)
+                                .padding(.vertical, 13)
+                                .padding(.horizontal, 22)
+                                .background(Capsule().fill(Color.white))
                         }
                         .buttonStyle(.plain)
                     }

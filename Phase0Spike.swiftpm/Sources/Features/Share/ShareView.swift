@@ -22,16 +22,16 @@ struct ShareView: View {
     var body: some View {
         let uiImage = UIImage(contentsOfFile: photoURL.path)
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
             VStack(spacing: 32) {
                 if let uiImage {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 380)
-                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .padding(10)
-                        .chassisPanel(cornerRadius: 22)
+                        .chassisPanel()
                 }
 
                 ChassisLabel(text: "Share Your Photo")
@@ -81,15 +81,9 @@ struct ShareView: View {
                         .foregroundStyle(Chassis.textSecondary)
                 }
 
-                Button {
+                PillButton(title: "Done") {
                     model.returnToAttract()
-                } label: {
-                    ChassisLabel(text: "Done", size: 14)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 36)
-                        .chassisPanel(cornerRadius: 26)
                 }
-                .buttonStyle(.plain)
                 .padding(.top, 8)
             }
             .padding()
@@ -150,23 +144,15 @@ struct ShareView: View {
         VStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Chassis.controlHighlight, Chassis.control],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
+                    .fill(Chassis.card.opacity(0.86))
                 Circle()
                     .strokeBorder(Chassis.hairline, lineWidth: 1)
-                Circle()
-                    .strokeBorder(Chassis.hairline, lineWidth: 1)
-                    .padding(7)
                 Image(systemName: systemImage)
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(Chassis.textPrimary)
             }
-            .frame(width: 88, height: 88)
-            .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
+            .frame(width: 84, height: 84)
+            .shadow(color: .black.opacity(0.4), radius: 10, y: 4)
 
             ChassisLabel(text: label, size: 11)
         }

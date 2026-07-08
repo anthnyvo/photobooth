@@ -11,7 +11,7 @@ struct ReadyToShootView: View {
 
     var body: some View {
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
 
             if let frame = model.liveViewImage {
                 Image(uiImage: frame)
@@ -25,7 +25,7 @@ struct ReadyToShootView: View {
                 Spacer()
                 ZStack {
                     Circle()
-                        .fill(Chassis.panel.opacity(0.85))
+                        .fill(Chassis.card.opacity(0.85))
                     Circle()
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
                     Circle()

@@ -8,26 +8,26 @@ struct ReviewView: View {
 
     var body: some View {
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
             VStack(spacing: 32) {
                 if let uiImage = UIImage(contentsOfFile: photoURL.path) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .padding(10)
-                        .chassisPanel(cornerRadius: 24)
+                        .chassisPanel()
                         .padding(.horizontal, 24)
                         .padding(.top, 24)
                 } else {
                     Text("Couldn't load photo").foregroundStyle(Chassis.textPrimary)
                 }
 
-                HStack(spacing: 56) {
-                    DialButton(label: "Retake", systemImage: "arrow.counterclockwise") {
+                HStack(spacing: 24) {
+                    PillButton(title: "Retake", prominent: false) {
                         model.retake()
                     }
-                    DialButton(label: "Use Photo", systemImage: "checkmark", accent: theme.primary) {
+                    PillButton(title: "Use Photo") {
                         model.accept()
                     }
                 }
