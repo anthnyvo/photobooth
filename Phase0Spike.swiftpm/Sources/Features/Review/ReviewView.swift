@@ -8,36 +8,27 @@ struct ReviewView: View {
 
     var body: some View {
         ZStack {
-            theme.background.ignoresSafeArea()
-            VStack(spacing: 24) {
+            Chassis.base.ignoresSafeArea()
+            VStack(spacing: 32) {
                 if let uiImage = UIImage(contentsOfFile: photoURL.path) {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .padding(24)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .padding(10)
+                        .chassisPanel(cornerRadius: 24)
+                        .padding(.horizontal, 24)
+                        .padding(.top, 24)
                 } else {
-                    Text("Couldn't load photo").foregroundStyle(.white)
+                    Text("Couldn't load photo").foregroundStyle(Chassis.textPrimary)
                 }
 
-                HStack(spacing: 32) {
-                    Button(action: model.retake) {
-                        Label("Retake", systemImage: "arrow.counterclockwise")
-                            .font(.title2.bold())
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 16)
-                            .background(.white.opacity(0.15))
-                            .foregroundStyle(.white)
-                            .clipShape(Capsule())
+                HStack(spacing: 56) {
+                    DialButton(label: "Retake", systemImage: "arrow.counterclockwise") {
+                        model.retake()
                     }
-                    Button(action: model.accept) {
-                        Label("Use This Photo", systemImage: "checkmark")
-                            .font(.title2.bold())
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 16)
-                            .background(theme.primary)
-                            .foregroundStyle(.white)
-                            .clipShape(Capsule())
+                    DialButton(label: "Use Photo", systemImage: "checkmark", accent: theme.primary) {
+                        model.accept()
                     }
                 }
                 .padding(.bottom, 40)
