@@ -255,23 +255,36 @@ public actor EOSCamera {
         // that source: RemoteReleaseOn takes 2 params (press-stage, 0) —
         // the earlier single-param theory was a dead end, made no difference.
         //
-        // The actual root cause of every prior DeviceBusy (0x2019) failure
-        // today: on a failed full-press, libgphoto2 ALWAYS releases the
-        // half-press before returning the error. Our code never did — every
-        // failed attempt left the body physically stuck half-pressed, and it
-        // reports DeviceBusy for every future full-press until that release
-        // finally happens. That state persists across our app's disconnects
-        // (it's the camera's own physical/logical button state, not our
-        // session's) — explaining why retries, event-draining, EVF teardown,
-        // and reconnecting all failed identically: the camera has been
-        // wedged since the first failed attempt, not re-broken each time.
-        // The leading release below is defensive cleanup for that existing
-        // stuck state; the one in the failure path prevents it recurring.
+        // Releasing half-press on a failed full-press (below) is real and
+        // necessary — a leftover held half-press does make the body refuse
+        // every future full-press with DeviceBusy — but hardware testing
+        // showed it wasn't the whole story: even starting from a freshly
+        // released state, full-press still failed busy on the very first
+        // try. libgphoto2's reference never blindly sleeps between half and
+        // full press; it actively polls GetEvent watching for OLCInfoChanged
+        // (0xC1A5, carries focus-confirm data) before ever attempting full
+        // press. Our event loop was cancelled before this function even
+        // started, so that event — if the body sends it at all — was never
+        // once actually observed. Poll for it now instead of guessing a
+        // fixed delay.
         _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
 
         try await expectOK("ReleaseOn(half)",
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
-        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        var sawOLCInfo = false
+        for _ in 0..<5 {
+            if let eventResult = try? await transport.send(code: CanonOp.getEvent) {
+                for record in CanonEventRecord.parse(eventResult.payload) {
+                    if record.type == CanonEvent.olcInfoChanged { sawOLCInfo = true }
+                    if record.type != CanonEvent.propValueChanged {
+                        log(String(format: "  half-press wait: event 0x%04X (%d bytes)", record.type, record.payload.count))
+                    }
+                }
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        log("half-press settle: OLCInfoChanged \(sawOLCInfo ? "seen" : "never seen")")
 
         let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 0])
         if let code = fullPress.response?.code, code != PTPResponseCode.ok {

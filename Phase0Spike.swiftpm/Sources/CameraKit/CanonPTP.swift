@@ -70,6 +70,12 @@ public enum CanonEvent {
     /// events never come — this is Canon's own signal that a host-destined
     /// capture is ready to transfer.
     public static let requestObjectTransfer: UInt32 = 0xC186
+    /// Carries focus-confirm data during a half-press (libgphoto2:
+    /// PTP_EC_CANON_EOS_OLCInfoChanged). Never observed in this app's logs
+    /// yet — our event loop is cancelled before triggerShutter() ever runs,
+    /// so we've never actually polled GetEvent during the one window this
+    /// fires in. If it never shows up even now, AF genuinely isn't running.
+    public static let olcInfoChanged: UInt32 = 0xC1A5
 }
 
 /// One record parsed out of a Canon GetEvent data blob.
