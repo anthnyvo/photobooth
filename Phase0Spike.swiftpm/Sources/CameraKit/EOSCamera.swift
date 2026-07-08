@@ -89,7 +89,23 @@ public actor EOSCamera {
                 do {
                     let result = try await self.transport.send(code: CanonOp.getEvent)
                     let records = CanonEventRecord.parse(result.payload)
-                    for record in records where record.type != CanonEvent.propValueChanged {
+                    for record in records {
+                        // PropValueChanged (0xC189) is filtered from the
+                        // general log (it fires constantly) except for the
+                        // couple of props worth seeing ground truth for —
+                        // Canon EOS has no synchronous "get current value"
+                        // call; libgphoto2's own getdevicepropdesc is a pure
+                        // cache lookup populated from exactly this event.
+                        if record.type == CanonEvent.propValueChanged {
+                            if record.payload.count >= 8 {
+                                let propcode = record.payload.readLE(UInt32.self, at: 0)
+                                if propcode == CanonProp.focusMode || propcode == CanonProp.captureDestination {
+                                    let valueBytes = record.payload.dropFirst(4).map { String(format: "%02X", $0) }.joined(separator: " ")
+                                    await self.log(String(format: "prop 0x%04X = [%@]", propcode, valueBytes))
+                                }
+                            }
+                            continue
+                        }
                         await self.log(String(format: "event 0x%04X (%d bytes)", record.type, record.payload.count))
                     }
                 } catch {
@@ -269,14 +285,25 @@ public actor EOSCamera {
         try await expectOK("ReleaseOn(half)",
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
 
+        // FocusMode==3 means manual focus, in which case libgphoto2 never
+        // waits for AF confirmation at all — worth knowing which mode we're
+        // actually in rather than relying on what a physical switch looked
+        // like from outside. Also surfacing CaptureDestination here in case
+        // it silently reverted from Host after the initial connect-time set.
         var sawOLCInfo = false
         for _ in 0..<5 {
             if let eventResult = try? await transport.send(code: CanonOp.getEvent) {
                 for record in CanonEventRecord.parse(eventResult.payload) {
                     if record.type == CanonEvent.olcInfoChanged { sawOLCInfo = true }
-                    if record.type != CanonEvent.propValueChanged {
-                        log(String(format: "  half-press wait: event 0x%04X (%d bytes)", record.type, record.payload.count))
+                    if record.type == CanonEvent.propValueChanged, record.payload.count >= 8 {
+                        let propcode = record.payload.readLE(UInt32.self, at: 0)
+                        if propcode == CanonProp.focusMode || propcode == CanonProp.captureDestination {
+                            let valueBytes = record.payload.dropFirst(4).map { String(format: "%02X", $0) }.joined(separator: " ")
+                            log(String(format: "  half-press wait: prop 0x%04X = [%@]", propcode, valueBytes))
+                        }
+                        continue
                     }
+                    log(String(format: "  half-press wait: event 0x%04X (%d bytes)", record.type, record.payload.count))
                 }
             }
             try? await Task.sleep(nanoseconds: 100_000_000)

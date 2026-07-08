@@ -53,6 +53,11 @@ public enum CanonProp {
     /// third-party tethering — the camera also tries to write the card mid-
     /// capture, and any card hiccup surfaces as a body-halting error.
     public static let captureDestinationHost: UInt32 = 4
+    /// 3 = manual focus. libgphoto2 checks this before deciding whether to
+    /// wait for AF confirmation at all — worth knowing which mode the body
+    /// is actually in during capture debugging, not just what a switch
+    /// looked like from outside.
+    public static let focusMode: UInt32 = 0xD108
     public static let iso: UInt32 = 0xD103
     public static let whiteBalance: UInt32 = 0xD109
     public static let exposureCompensation: UInt32 = 0xD104
