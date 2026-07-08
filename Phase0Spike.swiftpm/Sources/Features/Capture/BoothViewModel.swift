@@ -144,7 +144,7 @@ public final class BoothViewModel: ObservableObject {
             // reconnecting with the same IP, rather than leaving the booth
             // silently wedged until an attendant notices and manually hits
             // Connect again.
-            transport?.disconnect()
+            await transport?.disconnect()
             step = .connecting
             connectionMessage = "Connection lost — reconnecting…"
             try? await Task.sleep(nanoseconds: 1_000_000_000)
