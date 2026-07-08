@@ -61,16 +61,20 @@ public actor EOSCamera {
             try await expectOK("SetEventMode",
                 await transport.send(code: CanonOp.setEventMode, parameters: [1]))
             startEventLoop()
-            // Route captures to the host, not the card — see CanonProp doc
-            // comment. Non-fatal if the body rejects it (older bodies may
-            // not expose this property); log and continue either way.
-            do {
-                try await setProperty(CanonProp.captureDestination,
-                                      CanonProp.captureDestinationHost,
-                                      name: "CaptureDestination=Host")
-            } catch {
-                log("CaptureDestination=Host rejected (\(error)) — continuing, capture may still hit the card")
-            }
+            // TEMPORARILY DISABLED for a diagnostic test: AF has been
+            // blocked camera-wide (remote AND physical shutter both) for
+            // the entire remote session on every prior build, and every
+            // theory involving EVFOutputDevice or the RemoteReleaseOn AF
+            // parameter has been ruled out on hardware. The only other
+            // thing enterRemoteMode() changes from the body's own defaults
+            // is this property (default read as 2/Card; we were forcing 4/
+            // Host). Leaving it untouched to isolate whether this is the
+            // actual variable before committing to redesigning capture
+            // retrieval around card storage.
+            // try await setProperty(CanonProp.captureDestination,
+            //                       CanonProp.captureDestinationHost,
+            //                       name: "CaptureDestination=Host")
+            log("CaptureDestination left at camera default (diagnostic test — see comment above)")
             state = .connected
             log("remote mode active")
         } catch {
