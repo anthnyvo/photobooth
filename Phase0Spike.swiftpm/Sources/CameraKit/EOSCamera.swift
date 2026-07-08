@@ -148,6 +148,10 @@ public actor EOSCamera {
             var lastDiagLog = ContinuousClock.now.advanced(by: .seconds(-10))
             while !Task.isCancelled {
                 guard let self, let continuation = await self.liveViewContinuation else { break }
+                if await self.isCapturePaused {
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    continue
+                }
                 do {
                     let result = try await self.transport.send(
                         code: CanonOp.getViewFinderData,
@@ -214,33 +218,26 @@ public actor EOSCamera {
 
     // MARK: - Capture
 
+    /// Set while a capture is in flight — the live view loop checks this and
+    /// skips its own polling, leaving the room on the shared connection for
+    /// the shutter/download calls. Deliberately does NOT touch
+    /// EVFOutputDevice: a prior attempt fully tore the stream down
+    /// (EVFOutputDevice=0) before capturing, on the theory that the camera's
+    /// own EVF pipeline was contending for the shutter mechanism. That made
+    /// no difference and is very likely backwards for a mirrorless body —
+    /// the EOS R's Dual Pixel AF runs *through* the same continuous sensor
+    /// stream live view uses, so turning it fully off may have killed the
+    /// only pipeline AF depends on (matches hardware evidence: OLCInfoChanged,
+    /// the focus-confirm event, never fired even once while EVF was down).
+    private(set) var isCapturePaused = false
+
     /// Trigger the shutter and return the resulting full-resolution image.
     public func capturePhoto() async throws -> Data {
-        // Merely *pausing our own polling* (an isCapturePaused flag the loop
-        // checked) left EVFOutputDevice=3 (streaming) active on the camera
-        // itself the whole time full-press was attempted — it returned
-        // DeviceBusy (0x2019) persistently, unmoved by ~7s of retries or
-        // draining GetEvent in between. Real EOS tethering tools fully stop
-        // the EVF stream before a capture, not just stop polling it; doing
-        // the same here, then restoring it after.
         eventLoopTask?.cancel()
-        let wasStreamingLiveView = liveViewTask != nil
-        if wasStreamingLiveView {
-            liveViewTask?.cancel()
-            liveViewTask = nil
-            try? await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off (capture)")
-            try? await Task.sleep(nanoseconds: 300_000_000)
-        }
+        isCapturePaused = true
         defer {
+            isCapturePaused = false
             startEventLoop()
-            if wasStreamingLiveView {
-                Task { [weak self] in
-                    guard let self else { return }
-                    try? await self.setProperty(CanonProp.evfOutputDevice, 3, name: "EVFOutputDevice=cameraAndHost (resume)")
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    await self.startLiveViewPolling()
-                }
-            }
         }
         try await triggerShutter()
         return try await transport.nextCapturedFile(timeout: 15)
