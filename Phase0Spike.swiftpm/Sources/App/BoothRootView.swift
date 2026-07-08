@@ -53,28 +53,73 @@ private struct ConnectView: View {
 
     var body: some View {
         ZStack {
-            theme.background.ignoresSafeArea()
-            VStack(spacing: 20) {
-                Image(systemName: "camera.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(theme.primary)
+            Chassis.base.ignoresSafeArea()
+            VStack(spacing: 24) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Chassis.controlHighlight, Chassis.control],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                    Circle()
+                        .strokeBorder(Chassis.hairline, lineWidth: 1)
+                    Circle()
+                        .strokeBorder(Chassis.hairline, lineWidth: 1)
+                        .padding(8)
+                    Image(systemName: "camera.fill")
+                        .font(.system(size: 40, weight: .medium))
+                        .foregroundStyle(theme.primary)
+                }
+                .frame(width: 116, height: 116)
+                .shadow(color: .black.opacity(0.5), radius: 12, y: 5)
+
                 Text(model.connectionMessage)
-                    .font(.title3)
-                    .foregroundStyle(.white)
+                    .font(.callout)
+                    .foregroundStyle(Chassis.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
 
-                HStack {
-                    TextField("Camera IP", text: $model.cameraIPText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 200)
-                        #if os(iOS)
-                        .keyboardType(.numbersAndPunctuation)
-                        .textInputAutocapitalization(.never)
-                        #endif
-                    Button("Connect", action: model.connectCamera)
-                        .buttonStyle(.borderedProminent)
+                VStack(spacing: 14) {
+                    ChassisLabel(text: "Camera IP", size: 10)
+                    HStack(spacing: 12) {
+                        TextField("192.168.1.2", text: $model.cameraIPText)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(Chassis.textPrimary)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Chassis.control)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Chassis.hairline, lineWidth: 1)
+                            )
+                            .frame(width: 190)
+                            #if os(iOS)
+                            .keyboardType(.numbersAndPunctuation)
+                            .textInputAutocapitalization(.never)
+                            #endif
+                        Button(action: model.connectCamera) {
+                            ChassisLabel(text: "Connect", size: 12)
+                                .padding(.vertical, 14)
+                                .padding(.horizontal, 20)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(Chassis.control)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .strokeBorder(theme.primary.opacity(0.55), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(20)
+                .chassisPanel()
 
                 if let error = model.lastError {
                     Text(error)
@@ -86,7 +131,7 @@ private struct ConnectView: View {
 
                 Button("Event Setup") { showAdmin = true }
                     .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Chassis.textSecondary)
                     .padding(.top, 20)
             }
         }

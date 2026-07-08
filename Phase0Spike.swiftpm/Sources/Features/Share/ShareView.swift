@@ -16,21 +16,21 @@ struct ShareView: View {
     var body: some View {
         let uiImage = UIImage(contentsOfFile: photoURL.path)
         ZStack {
-            theme.background.ignoresSafeArea()
-            VStack(spacing: 28) {
+            Chassis.base.ignoresSafeArea()
+            VStack(spacing: 32) {
                 if let uiImage {
                     Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 380)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(10)
+                        .chassisPanel(cornerRadius: 22)
                 }
 
-                Text("Share your photo")
-                    .font(.title.bold())
-                    .foregroundStyle(.white)
+                ChassisLabel(text: "Share Your Photo")
 
-                HStack(spacing: 24) {
+                HStack(spacing: 36) {
                     if model.config.share.airdrop {
                         // A bare file URL doesn't reliably present as an
                         // actual photo to third-party share targets (WhatsApp
@@ -40,22 +40,19 @@ struct ShareView: View {
                         // as real image data instead of a generic file link.
                         if let uiImage {
                             ShareLink(item: Image(uiImage: uiImage), preview: SharePreview("Photo", image: Image(uiImage: uiImage))) {
-                                shareButton(label: "AirDrop", systemImage: "wifi")
+                                dialFace(label: "AirDrop", systemImage: "wifi")
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                     if model.config.share.qrGallery {
-                        Button {
+                        DialButton(label: "QR Code", systemImage: "qrcode") {
                             presentQR()
-                        } label: {
-                            shareButton(label: "QR Code", systemImage: "qrcode")
                         }
                     }
                     if model.config.print.enabled {
-                        Button {
+                        DialButton(label: "Print", systemImage: "printer") {
                             printJob.print(photoURL: photoURL)
-                        } label: {
-                            shareButton(label: "Print", systemImage: "printer")
                         }
                     }
                 }
@@ -63,15 +60,19 @@ struct ShareView: View {
                 if let status = printJob.statusMessage {
                     Text(status)
                         .font(.callout)
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(Chassis.textSecondary)
                 }
 
-                Button("Done") {
+                Button {
                     model.returnToAttract()
+                } label: {
+                    ChassisLabel(text: "Done", size: 14)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 36)
+                        .chassisPanel(cornerRadius: 26)
                 }
-                .font(.title3.bold())
-                .padding(.top, 12)
-                .foregroundStyle(.white.opacity(0.8))
+                .buttonStyle(.plain)
+                .padding(.top, 8)
             }
             .padding()
         }
@@ -111,23 +112,32 @@ struct ShareView: View {
         }
     }
 
-    /// Icon-over-label, not a horizontal Label — three side-by-side pills
-    /// wide enough for "AirDrop"/"QR Code"/"Print" at a readable font don't
-    /// fit an HStack on a phone-width screen; the HStack compressed each
-    /// pill down to where the text wrapped one character per line. This
-    /// layout stays narrow and readable regardless of label length.
-    private func shareButton(label: String, systemImage: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.title2)
-            Text(label)
-                .font(.caption.bold())
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+    /// DialButton's face without the Button wrapper — ShareLink supplies its
+    /// own tap handling, so it needs a plain label view rather than a nested
+    /// button. Kept visually identical to DialButton (Theme.swift).
+    private func dialFace(label: String, systemImage: String) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Chassis.controlHighlight, Chassis.control],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                Circle()
+                    .strokeBorder(Chassis.hairline, lineWidth: 1)
+                Circle()
+                    .strokeBorder(Chassis.hairline, lineWidth: 1)
+                    .padding(7)
+                Image(systemName: systemImage)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(Chassis.textPrimary)
+            }
+            .frame(width: 88, height: 88)
+            .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
+
+            ChassisLabel(text: label, size: 11)
         }
-        .frame(width: 84, height: 84)
-        .background(theme.primary)
-        .foregroundStyle(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 }

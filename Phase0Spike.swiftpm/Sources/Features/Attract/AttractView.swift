@@ -1,22 +1,22 @@
 import SwiftUI
 
-/// Idle/attract screen — loops live view as a backdrop with a "Tap to Start"
-/// call to action. Branding-driven: logo and colors come from EventConfig,
-/// nothing hardcoded here.
+/// Idle/attract screen — loops live view as a backdrop with a shutter-ring
+/// "tap to start" control. Branding-driven: logo and accent color come from
+/// EventConfig; the dark chassis styling is fixed (see Theme.swift).
 struct AttractView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
 
     var body: some View {
         ZStack {
-            theme.background.ignoresSafeArea()
+            Chassis.base.ignoresSafeArea()
 
             if let frame = model.liveViewImage {
                 Image(uiImage: frame)
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
-                    .overlay(theme.background.opacity(0.35).ignoresSafeArea())
+                    .overlay(Chassis.base.opacity(0.55).ignoresSafeArea())
             }
 
             VStack(spacing: 24) {
@@ -31,20 +31,35 @@ struct AttractView: View {
                     }
                 }
                 Text(model.config.displayName)
-                    .font(.system(size: 44, weight: .bold))
-                    .foregroundStyle(.white)
-                    .shadow(radius: 8)
+                    .font(.system(size: 40, weight: .bold))
+                    .foregroundStyle(Chassis.textPrimary)
+                    .shadow(color: .black.opacity(0.6), radius: 8)
                 Spacer()
+
+                // Shutter-ring start control: outer hairline ring, accent
+                // inner disc — reads as a camera control, not a web button.
                 Button(action: model.tapToStart) {
-                    Text("Tap to Start")
-                        .font(.title.bold())
-                        .padding(.horizontal, 48)
-                        .padding(.vertical, 20)
-                        .background(theme.primary)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
+                    VStack(spacing: 18) {
+                        ZStack {
+                            Circle()
+                                .fill(Chassis.panel.opacity(0.85))
+                            Circle()
+                                .strokeBorder(Chassis.hairline, lineWidth: 1)
+                            Circle()
+                                .strokeBorder(.white.opacity(0.8), lineWidth: 3)
+                                .padding(10)
+                            Circle()
+                                .fill(theme.primary)
+                                .padding(18)
+                        }
+                        .frame(width: 108, height: 108)
+                        .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
+
+                        ChassisLabel(text: "Tap to Start")
+                    }
                 }
-                .padding(.bottom, 60)
+                .buttonStyle(.plain)
+                .padding(.bottom, 56)
             }
 
             if let error = model.lastError {
@@ -52,7 +67,7 @@ struct AttractView: View {
                     Spacer()
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Chassis.textPrimary)
                         .padding(10)
                         .background(.red.opacity(0.85))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
