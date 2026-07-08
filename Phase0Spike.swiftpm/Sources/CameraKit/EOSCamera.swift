@@ -294,8 +294,14 @@ public actor EOSCamera {
         // adapter apparently never resolves the cycle at all.
         _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
 
+        // param2=1 ("skip AF") on the half-press itself immediately failed
+        // busy on hardware — half-press's whole point is normally to start
+        // AF, so "half-press, don't AF" is likely a rejected/nonsensical
+        // combination. Back to 0 (request AF) here; the non-AF flag stays
+        // on the full-press below, which is where AF-confirm gating would
+        // actually matter for a lens that can never send that confirm.
         try await expectOK("ReleaseOn(half)",
-            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 1]))
+            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
 
         // FocusMode==3 means manual focus, in which case libgphoto2 never
         // waits for AF confirmation at all — worth knowing which mode we're
