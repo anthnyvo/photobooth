@@ -1,4 +1,5 @@
 import SwiftUI
+import MessageUI
 
 /// Share/print screen — every channel here is independently toggleable per
 /// event via EventConfig.share/.print, never hardcoded on.
@@ -12,6 +13,11 @@ struct ShareView: View {
     @State private var qrURL: URL?
     @State private var qrError: String?
     @State private var showingQR = false
+    @State private var showingMail = false
+    /// Scoped to this one guest's turn — this view is freshly created per
+    /// BoothStep.sharing(url), so a plain @State counter is already exactly
+    /// "prints used this session," no BoothViewModel bookkeeping needed.
+    @State private var printsThisSession = 0
 
     var body: some View {
         let uiImage = UIImage(contentsOfFile: photoURL.path)
@@ -50,14 +56,26 @@ struct ShareView: View {
                             presentQR()
                         }
                     }
+                    if model.config.share.email && MFMailComposeViewController.canSendMail() {
+                        DialButton(label: "Email", systemImage: "envelope") {
+                            showingMail = true
+                        }
+                    }
                     if model.config.print.enabled {
                         DialButton(label: "Print", systemImage: "printer") {
+                            printsThisSession += 1
                             printJob.print(photoURL: photoURL)
                         }
+                        .disabled(printLimitReached)
+                        .opacity(printLimitReached ? 0.4 : 1)
                     }
                 }
 
-                if let status = printJob.statusMessage {
+                if printLimitReached {
+                    Text("Print limit reached for this guest")
+                        .font(.callout)
+                        .foregroundStyle(Chassis.textSecondary)
+                } else if let status = printJob.statusMessage {
                     Text(status)
                         .font(.callout)
                         .foregroundStyle(Chassis.textSecondary)
@@ -80,6 +98,19 @@ struct ShareView: View {
         .sheet(isPresented: $showingQR) {
             QRShareSheet(image: qrImage, url: qrURL, error: qrError)
         }
+        .sheet(isPresented: $showingMail) {
+            MailComposeView(photoURL: photoURL)
+        }
+        .onChange(of: printJob.statusMessage) { _, message in
+            if message == "Sent to printer" {
+                EventStorage.shared.recordPrint(eventId: model.config.eventId)
+            }
+        }
+    }
+
+    private var printLimitReached: Bool {
+        guard let limit = model.config.print.limitPerGuest else { return false }
+        return printsThisSession >= limit
     }
 
     /// Starts the local server on first use (cheap, stays running for the

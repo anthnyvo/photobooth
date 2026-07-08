@@ -42,6 +42,35 @@ public struct EventConfig: Codable, Sendable, Equatable {
         }
     }
 
+    /// A frame/logo composited onto the actual saved photo (not just shown in
+    /// the UI) — burned into the file so it's there in every shared/printed
+    /// copy. Filename lives in the event's assets/ folder, same as the logo.
+    public struct OverlayOptions: Codable, Sendable, Equatable {
+        public var enabled: Bool
+        public var assetName: String?
+
+        public init(enabled: Bool = false, assetName: String? = nil) {
+            self.enabled = enabled
+            self.assetName = assetName
+        }
+
+        public static let `default` = OverlayOptions()
+    }
+
+    /// Multiple shots composited into one vertical strip instead of a single
+    /// photo. shotCount is only meaningful while enabled.
+    public struct StripOptions: Codable, Sendable, Equatable {
+        public var enabled: Bool
+        public var shotCount: Int
+
+        public init(enabled: Bool = false, shotCount: Int = 3) {
+            self.enabled = enabled
+            self.shotCount = shotCount
+        }
+
+        public static let `default` = StripOptions()
+    }
+
     public var eventId: String
     public var displayName: String
     public var branding: BrandingMode
@@ -51,6 +80,8 @@ public struct EventConfig: Codable, Sendable, Equatable {
     public var countdownSeconds: Int
     public var share: ShareOptions
     public var print: PrintOptions
+    public var overlay: OverlayOptions
+    public var strip: StripOptions
     public var createdAt: Date
 
     public init(
@@ -62,6 +93,8 @@ public struct EventConfig: Codable, Sendable, Equatable {
         countdownSeconds: Int = 5,
         share: ShareOptions = ShareOptions(),
         print: PrintOptions = PrintOptions(),
+        overlay: OverlayOptions = OverlayOptions(),
+        strip: StripOptions = StripOptions(),
         createdAt: Date = Date()
     ) {
         self.eventId = eventId
@@ -72,6 +105,8 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.countdownSeconds = countdownSeconds
         self.share = share
         self.print = print
+        self.overlay = overlay
+        self.strip = strip
         self.createdAt = createdAt
     }
 
@@ -79,5 +114,45 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// the fallback if no event has been configured yet at all.
     public static func standardDefault(eventId: String = "standard") -> EventConfig {
         EventConfig(eventId: eventId, displayName: "Photobooth", branding: .standard)
+    }
+
+    // MARK: - Codable
+
+    /// `overlay`/`strip` are decoded leniently (missing key -> disabled
+    /// default) so config.json files written before these fields existed
+    /// still load instead of crashing the booth on launch.
+    private enum CodingKeys: String, CodingKey {
+        case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
+        case share, print, overlay, strip, createdAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        eventId = try container.decode(String.self, forKey: .eventId)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        branding = try container.decode(BrandingMode.self, forKey: .branding)
+        colors = try container.decode(Colors.self, forKey: .colors)
+        logoAssetName = try container.decodeIfPresent(String.self, forKey: .logoAssetName)
+        countdownSeconds = try container.decode(Int.self, forKey: .countdownSeconds)
+        share = try container.decode(ShareOptions.self, forKey: .share)
+        print = try container.decode(PrintOptions.self, forKey: .print)
+        overlay = try container.decodeIfPresent(OverlayOptions.self, forKey: .overlay) ?? .default
+        strip = try container.decodeIfPresent(StripOptions.self, forKey: .strip) ?? .default
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(eventId, forKey: .eventId)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(branding, forKey: .branding)
+        try container.encode(colors, forKey: .colors)
+        try container.encodeIfPresent(logoAssetName, forKey: .logoAssetName)
+        try container.encode(countdownSeconds, forKey: .countdownSeconds)
+        try container.encode(share, forKey: .share)
+        try container.encode(print, forKey: .print)
+        try container.encode(overlay, forKey: .overlay)
+        try container.encode(strip, forKey: .strip)
+        try container.encode(createdAt, forKey: .createdAt)
     }
 }

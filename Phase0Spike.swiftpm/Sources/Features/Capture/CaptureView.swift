@@ -43,6 +43,17 @@ struct CaptureView: View {
             default:
                 EmptyView()
             }
+
+            if let progress = model.stripProgress {
+                VStack {
+                    ChassisLabel(text: "Shot \(progress.shot) of \(progress.total)", size: 13)
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 20)
+                        .chassisPanel(cornerRadius: 20)
+                        .padding(.top, 24)
+                    Spacer()
+                }
+            }
         }
         .animation(.easeOut(duration: 0.25), value: model.step)
     }
