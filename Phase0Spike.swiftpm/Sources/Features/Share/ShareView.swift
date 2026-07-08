@@ -8,6 +8,10 @@ struct ShareView: View {
     let photoURL: URL
 
     @StateObject private var printJob = PrintJob()
+    @State private var qrImage: UIImage?
+    @State private var qrURL: URL?
+    @State private var qrError: String?
+    @State private var showingQR = false
 
     var body: some View {
         let uiImage = UIImage(contentsOfFile: photoURL.path)
@@ -40,6 +44,13 @@ struct ShareView: View {
                             }
                         }
                     }
+                    if model.config.share.qrGallery {
+                        Button {
+                            presentQR()
+                        } label: {
+                            shareButton(label: "QR Code", systemImage: "qrcode")
+                        }
+                    }
                     if model.config.print.enabled {
                         Button {
                             printJob.print(photoURL: photoURL)
@@ -65,6 +76,34 @@ struct ShareView: View {
             .padding()
         }
         .onAppear { model.scheduleAutoReturn() }
+        .sheet(isPresented: $showingQR) {
+            QRShareSheet(image: qrImage, url: qrURL, error: qrError)
+        }
+    }
+
+    /// Starts the local server on first use (cheap, stays running for the
+    /// rest of the session) and resolves this photo's guest-facing URL.
+    /// Needs the camera joined to the venue's Wi-Fi (not its own private AP)
+    /// so this device and the guest's phone share a network — see
+    /// LocalPhotoServer's doc comment.
+    private func presentQR() {
+        qrImage = nil
+        qrURL = nil
+        qrError = nil
+        showingQR = true
+        Task {
+            do {
+                try await LocalPhotoServer.shared.start()
+                guard let url = await LocalPhotoServer.shared.url(forPhoto: photoURL) else {
+                    qrError = "Not connected to a Wi-Fi network — join the venue's Wi-Fi to enable QR sharing."
+                    return
+                }
+                qrURL = url
+                qrImage = QRCode.image(for: url.absoluteString)
+            } catch {
+                qrError = "Couldn't start local server: \(error)"
+            }
+        }
     }
 
     private func shareButton(label: String, systemImage: String) -> some View {
