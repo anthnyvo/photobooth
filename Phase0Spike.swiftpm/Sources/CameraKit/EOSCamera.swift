@@ -34,9 +34,16 @@ public actor EOSCamera {
     private var eventLoopTask: Task<Void, Never>?
     private var liveViewTask: Task<Void, Never>?
     public private(set) var liveViewStats = LiveViewStats()
+    /// Raw value from the last PropValueChanged event carrying
+    /// CanonProp.batteryLevel — nil until (if) the body ever sends one.
+    /// Unverified encoding (see CanonProp.batteryLevel) — best-effort.
+    public private(set) var batteryLevel: UInt32?
 
     /// Diagnostic log lines, mirrored to the spike UI.
     private var logSink: (@Sendable (String) -> Void)?
+    /// Fired whenever a fresh battery reading arrives, so BoothViewModel can
+    /// mirror it onto a @Published property without polling the actor.
+    private var batterySink: (@Sendable (UInt32) -> Void)?
 
     public init(transport: any PTPTransport) {
         self.transport = transport
@@ -44,6 +51,10 @@ public actor EOSCamera {
 
     public func setLogSink(_ sink: @escaping @Sendable (String) -> Void) {
         logSink = sink
+    }
+
+    public func setBatterySink(_ sink: @escaping @Sendable (UInt32) -> Void) {
+        batterySink = sink
     }
 
     private func log(_ message: String) {
@@ -106,6 +117,10 @@ public actor EOSCamera {
                                 if propcode == CanonProp.focusMode || propcode == CanonProp.captureDestination {
                                     let valueBytes = record.payload.dropFirst(4).map { String(format: "%02X", $0) }.joined(separator: " ")
                                     await self.log(String(format: "prop 0x%04X = [%@]", propcode, valueBytes))
+                                }
+                                if propcode == CanonProp.batteryLevel, record.payload.count >= 8 {
+                                    let value = record.payload.readLE(UInt32.self, at: 4)
+                                    await self.recordBatteryLevel(value)
                                 }
                             }
                             continue
@@ -228,6 +243,11 @@ public actor EOSCamera {
         liveViewContinuation = nil
         try await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off")
         state = .connected
+    }
+
+    private func recordBatteryLevel(_ value: UInt32) {
+        batteryLevel = value
+        batterySink?(value)
     }
 
     private func recordFrame(structured: Bool) {

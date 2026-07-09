@@ -26,6 +26,9 @@ public final class BoothViewModel: ObservableObject {
     /// Non-nil only mid-strip-sequence, so CaptureView can show "Shot 2 of 3"
     /// — nil (and ignored) for a normal single-shot capture.
     @Published public private(set) var stripProgress: (shot: Int, total: Int)?
+    /// Best-effort — nil until (if) the camera ever reports one. See
+    /// CanonProp.batteryLevel: encoding is unverified against real hardware.
+    @Published public private(set) var cameraBatteryLevel: UInt32?
 
     private var transport: PTPIPTransport?
     private var camera: EOSCamera?
@@ -80,6 +83,7 @@ public final class BoothViewModel: ObservableObject {
         camera = nil
         Task { await staleTransport?.disconnect() }
         liveViewImage = nil
+        cameraBatteryLevel = nil
         lastError = nil
         connectionMessage = "Enter the camera's IP and connect"
         step = .eventPicker
@@ -124,6 +128,7 @@ public final class BoothViewModel: ObservableObject {
             step = .connecting
             connectionMessage = "Camera disconnected — reconnect to continue"
             liveViewImage = nil
+            cameraBatteryLevel = nil
         default:
             break
         }
@@ -133,6 +138,9 @@ public final class BoothViewModel: ObservableObject {
         guard let camera else { return }
         do {
             try await camera.enterRemoteMode()
+            await camera.setBatterySink { [weak self] level in
+                Task { @MainActor in self?.cameraBatteryLevel = level }
+            }
             let frames = try await camera.startLiveView()
             liveViewConsumer?.cancel()
             liveViewConsumer = Task { [weak self] in

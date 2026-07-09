@@ -38,6 +38,7 @@ struct AdminView: View {
     @State private var overlayData: Data?
     @State private var saveMessage: String?
     @State private var showingDeleteConfirm = false
+    @State private var showingExport = false
 
     var body: some View {
         NavigationStack {
@@ -176,6 +177,9 @@ struct AdminView: View {
                 Button("Delete Event", role: .destructive, action: deleteEvent)
                 Button("Cancel", role: .cancel) {}
             }
+            .sheet(isPresented: $showingExport) {
+                PhotoExportSheet(photoURLs: EventStorage.shared.listPhotos(eventId: model.config.eventId))
+            }
         }
     }
 
@@ -191,10 +195,15 @@ struct AdminView: View {
 
         return Section("Status") {
             LabeledContent("Camera", value: cameraConnected ? "Connected" : "Not connected")
+            LabeledContent("Battery", value: model.cameraBatteryLevel.map { "\($0)" } ?? "—")
             LabeledContent("Photos taken", value: "\(photos)")
             LabeledContent("Prints", value: "\(prints)")
             LabeledContent("Guest sessions", value: "\(guests)")
             LabeledContent("Storage free", value: storageGB.map { String(format: "%.1f GB", $0) } ?? "—")
+            Button("Export All Photos (\(photos))") {
+                showingExport = true
+            }
+            .disabled(photos == 0)
         }
         .listRowBackground(Rectangle().fill(.ultraThinMaterial))
     }

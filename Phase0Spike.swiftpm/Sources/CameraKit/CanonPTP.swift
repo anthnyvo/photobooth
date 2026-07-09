@@ -62,6 +62,11 @@ public enum CanonProp {
     public static let whiteBalance: UInt32 = 0xD109
     public static let exposureCompensation: UInt32 = 0xD104
     public static let flashCompensation: UInt32 = 0xD105
+    /// Canon EOS vendor battery prop (libgphoto2: PTP_DPC_CANON_EOS_BatteryPower).
+    /// Unverified against real hardware — EOS bodies commonly report this as
+    /// a coarse level (empty/low/half/high/full), not a literal percentage;
+    /// treat the raw value as a rough tier, not an exact number.
+    public static let batteryLevel: UInt32 = 0xD800
 }
 
 public enum CanonEvent {
