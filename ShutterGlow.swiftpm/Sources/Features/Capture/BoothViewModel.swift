@@ -5,6 +5,7 @@ import SwiftUI
 /// SpikeViewModel — this one drives the actual booth experience, reusing the
 /// same CameraKit transport/protocol layer proven out in Phase 0.
 public enum BoothStep: Equatable {
+    case login
     case home
     case eventPicker
     case connecting
@@ -21,8 +22,10 @@ public enum BoothStep: Equatable {
 
 @MainActor
 public final class BoothViewModel: ObservableObject {
-    @Published public private(set) var step: BoothStep = .home
+    @Published public private(set) var step: BoothStep
     @Published public private(set) var config: EventConfig
+    @Published public private(set) var isSyncing = false
+    @Published public private(set) var syncError: String?
     @Published public var liveViewImage: UIImage?
     @Published public var cameraIPText: String = "192.168.1.2"
     @Published public private(set) var connectionMessage: String = "Enter the camera's IP and connect"
@@ -57,10 +60,60 @@ public final class BoothViewModel: ObservableObject {
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
         self.config = config
+        self.step = SupabaseAuth.shared.currentSession() != nil ? .home : .login
     }
 
     public func reloadConfig() {
         config = EventStorage.shared.loadCurrentOrDefault()
+    }
+
+    // MARK: - Auth / sync
+
+    public var signedInEmail: String? {
+        SupabaseAuth.shared.currentSession()?.email
+    }
+
+    public func signIn(email: String, password: String) async {
+        lastError = nil
+        do {
+            _ = try await SupabaseAuth.shared.signIn(email: email, password: password)
+            step = .home
+            await syncRemoteEvents()
+        } catch {
+            lastError = (error as? LocalizedError)?.errorDescription ?? "Sign in failed"
+        }
+    }
+
+    /// Skips sign-in entirely — the booth still runs off whatever events are
+    /// already cached locally (created on-device via Event Setup, or synced
+    /// on a previous login). Connectivity is never required to run an event
+    /// that's already been paired.
+    public func continueOffline() {
+        step = .home
+    }
+
+    public func signOut() {
+        SupabaseAuth.shared.signOut()
+        step = .login
+    }
+
+    /// Pulls this operator's events from the shared backend and mirrors them
+    /// into local storage. Best-effort: a failure (offline, expired session)
+    /// just leaves whatever's already cached in place rather than surfacing
+    /// as a hard error — the picker still works either way.
+    @discardableResult
+    public func syncRemoteEvents() async -> Bool {
+        guard SupabaseAuth.shared.currentSession() != nil else { return false }
+        isSyncing = true
+        syncError = nil
+        defer { isSyncing = false }
+        do {
+            try await RemoteSync.syncEvents()
+            return true
+        } catch {
+            syncError = "Couldn't sync — showing what's cached"
+            return false
+        }
     }
 
     /// QR sharing needs this device and the guest's phone on the same

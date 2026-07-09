@@ -44,6 +44,17 @@ public final class EventStorage {
         return config
     }
 
+    /// Creates the event's directories if needed and writes config — unlike
+    /// createEvent(), never touches the current-event pointer. Used by
+    /// RemoteSync to mirror synced events into local storage without
+    /// hijacking whichever event the attendant currently has selected.
+    public func upsertEvent(_ config: EventConfig) throws {
+        try fileManager.createDirectory(at: eventDirectory(config.eventId), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: assetsDirectory(config.eventId), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: photosDirectory(config.eventId), withIntermediateDirectories: true)
+        try save(config)
+    }
+
     public func save(_ config: EventConfig) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

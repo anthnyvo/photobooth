@@ -15,6 +15,37 @@ struct EventPickerView: View {
                 ChassisLabel(text: "Select Event", size: 16)
                     .padding(.top, 60)
 
+                if let email = model.signedInEmail {
+                    HStack(spacing: 12) {
+                        Text(email)
+                            .font(.caption)
+                            .foregroundStyle(Chassis.textSecondary)
+                            .lineLimit(1)
+                        if model.isSyncing {
+                            ProgressView().scaleEffect(0.7)
+                        } else {
+                            Button("Sync") {
+                                Task {
+                                    await model.syncRemoteEvents()
+                                    reload()
+                                }
+                            }
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Chassis.textPrimary)
+                        }
+                        Spacer()
+                        Button("Sign out") { model.signOut() }
+                            .font(.caption)
+                            .foregroundStyle(Chassis.textSecondary)
+                    }
+                    .padding(.horizontal, 24)
+                    if let syncError = model.syncError {
+                        Text(syncError)
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
+                }
+
                 if events.isEmpty {
                     Spacer()
                     Text("No events yet")
@@ -54,7 +85,15 @@ struct EventPickerView: View {
             }
         }
         .statusBarHidden()
-        .onAppear(perform: reload)
+        .onAppear {
+            reload()
+            if model.signedInEmail != nil {
+                Task {
+                    await model.syncRemoteEvents()
+                    reload()
+                }
+            }
+        }
         .sheet(isPresented: $showingNewEvent, onDismiss: reload) {
             PINGate {
                 AdminView(model: model, mode: .create)
