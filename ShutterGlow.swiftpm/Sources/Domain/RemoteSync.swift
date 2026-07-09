@@ -35,7 +35,20 @@ public enum RemoteSync {
         for event in events {
             await merge(event, config: configsByEvent[event.id])
         }
+        prune(keeping: Set(events.map(\.id)))
         return events.count
+    }
+
+    /// Deletes any locally-cached event that was itself pulled from the
+    /// backend (`isRemote`) but is no longer in the operator's current
+    /// event list — e.g. deleted on the dashboard. Purely local,
+    /// admin-created events (isRemote == false) are never touched by sync.
+    private static func prune(keeping remoteIds: Set<String>) {
+        for eventId in EventStorage.shared.listEventIds() {
+            guard let local = try? EventStorage.shared.load(eventId),
+                  local.isRemote, !remoteIds.contains(eventId) else { continue }
+            try? EventStorage.shared.deleteEvent(eventId)
+        }
     }
 
     private static func fetch<T: Decodable>(_ type: T.Type, path: String, session: AuthSession) async throws -> T {
@@ -62,6 +75,7 @@ public enum RemoteSync {
             displayName: event.clientName
         )
         local.displayName = event.clientName
+        local.isRemote = true
 
         if let config {
             local.countdownSeconds = config.liveViewSettings.countdownSeconds

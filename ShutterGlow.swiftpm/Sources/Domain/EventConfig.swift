@@ -163,6 +163,11 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// Offers Boomerang/GIF modes at the attract screen — recorded from the
     /// live-view stream (see AnimatedCapture), not full-res stills.
     public var animationsEnabled: Bool
+    /// True for an event mirrored down by RemoteSync from the shared
+    /// backend — lets a later sync tell "this event was deleted on the
+    /// dashboard, remove it here too" apart from an attendant's own
+    /// on-device event, which sync must never touch.
+    public var isRemote: Bool
     public var createdAt: Date
 
     public init(
@@ -179,6 +184,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         squareCrop: Bool = false,
         filtersEnabled: Bool = true,
         animationsEnabled: Bool = true,
+        isRemote: Bool = false,
         createdAt: Date = Date()
     ) {
         self.eventId = eventId
@@ -194,6 +200,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.squareCrop = squareCrop
         self.filtersEnabled = filtersEnabled
         self.animationsEnabled = animationsEnabled
+        self.isRemote = isRemote
         self.createdAt = createdAt
     }
 
@@ -210,7 +217,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, createdAt
+        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, isRemote, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -228,6 +235,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         squareCrop = try container.decodeIfPresent(Bool.self, forKey: .squareCrop) ?? false
         filtersEnabled = try container.decodeIfPresent(Bool.self, forKey: .filtersEnabled) ?? true
         animationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationsEnabled) ?? true
+        isRemote = try container.decodeIfPresent(Bool.self, forKey: .isRemote) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -246,6 +254,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(squareCrop, forKey: .squareCrop)
         try container.encode(filtersEnabled, forKey: .filtersEnabled)
         try container.encode(animationsEnabled, forKey: .animationsEnabled)
+        try container.encode(isRemote, forKey: .isRemote)
         try container.encode(createdAt, forKey: .createdAt)
     }
 }
