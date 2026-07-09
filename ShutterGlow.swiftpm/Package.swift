@@ -6,15 +6,15 @@ import PackageDescription
 import AppleProductTypes
 
 let package = Package(
-    name: "Phase0Spike",
+    name: "ShutterGlow",
     platforms: [
         .iOS("17.0")
     ],
     products: [
         .iOSApplication(
-            name: "Phase0Spike",
+            name: "ShutterGlow",
             targets: ["AppModule"],
-            bundleIdentifier: "com.anthonyvo.phase0spike",
+            bundleIdentifier: "com.anthonyvo.shutterglow",
             teamIdentifier: "",
             displayVersion: "1.0",
             bundleVersion: "1",

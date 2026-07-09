@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct Phase0SpikeApp: App {
+struct ShutterGlowApp: App {
     var body: some Scene {
         WindowGroup {
             BoothRootView()

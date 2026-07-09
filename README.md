@@ -7,7 +7,7 @@ before anything else gets built).
 ## Layout
 
 ```
-Phase0Spike.swiftpm/   Swift Playgrounds app project — builds and runs ON THE iPAD, no Mac.
+ShutterGlow.swiftpm/   Swift Playgrounds app project — builds and runs ON THE iPAD, no Mac.
   Package.swift        App manifest (camera purpose string declared here)
   Sources/App/         Spike UI: connect → live view → capture, fps counter, log export
   Sources/CameraKit/   PTP codec, Canon EOS protocol actor, ImageCaptureCore transport
@@ -31,7 +31,7 @@ docs/PHASE0.md         Test protocol T1–T7, exit criteria, fallback ladder, fi
    (from apple.com, NOT the Microsoft Store versions), then **AltServer for Windows**
    (altstore.io). AltServer sits in the system tray.
 2. Code edited on the PC → push → repo **Actions** tab → run **Build unsigned IPA**
-   (or `gh workflow run build-ipa.yml`) → download the `Phase0Spike-unsigned-ipa` artifact, unzip.
+   (or `gh workflow run build-ipa.yml`) → download the `ShutterGlow-unsigned-ipa` artifact, unzip.
 3. iPhone plugged into the PC via USB → AltServer tray icon → **Sideload .ipa** →
    pick the file, sign in with the free Apple ID when asked.
 4. On the iPhone: Settings → General → VPN & Device Management → trust the developer
@@ -46,7 +46,7 @@ If iteration gets minute-starved, making the repo public buys unlimited free min
 
 The `.swiftpm` folder is also a **Swift Playgrounds app project**. On the iPad:
 install Swift Playgrounds + Working Copy (both free), clone this repo in Working Copy,
-tap `Phase0Spike.swiftpm` in Files → opens in Playgrounds → Run. Iteration = push from
+tap `ShutterGlow.swiftpm` in Files → opens in Playgrounds → Run. Iteration = push from
 PC, pull in Working Copy, rerun. Caveat: whether Playgrounds' entitlement set allows
 ImageCaptureCore external-camera access is unverified; if blocked (no `camera found`
 log ever), use the AltServer loop above for the iPad too.

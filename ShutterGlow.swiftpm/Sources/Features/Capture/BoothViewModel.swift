@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// Guest-facing flow state. Distinct from Phase0Spike's diagnostic
+/// Guest-facing flow state. Distinct from ShutterGlow's diagnostic
 /// SpikeViewModel — this one drives the actual booth experience, reusing the
 /// same CameraKit transport/protocol layer proven out in Phase 0.
 public enum BoothStep: Equatable {

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Root router for the guest-facing booth. Phase0Spike's diagnostic screen
+/// Root router for the guest-facing booth. ShutterGlow's diagnostic screen
 /// (SpikeView) stays reachable via a long-press in the corner for ongoing
 /// hardware debugging, but this is the real product surface.
 struct BoothRootView: View {
