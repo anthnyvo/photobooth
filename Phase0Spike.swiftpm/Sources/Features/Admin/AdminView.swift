@@ -31,7 +31,9 @@ struct AdminView: View {
     @State private var printLimitCount = 1
     @State private var overlayEnabled = false
     @State private var stripEnabled = false
-    @State private var stripShotCount = 3
+    /// Which shot counts are offered at the attract screen — e.g. {3, 4}
+    /// shows both a 3-Shot and a 4-Shot button, not one fixed count.
+    @State private var stripShotCounts: Set<Int> = [3]
     @State private var stripLayout: EventConfig.StripOptions.Layout = .vertical
     @State private var squareCrop = false
     @State private var selectedLogo: PhotosPickerItem?
@@ -85,7 +87,17 @@ struct AdminView: View {
                 Section("Photo Strip") {
                     Toggle("Enable photo strip", isOn: $stripEnabled)
                     if stripEnabled {
-                        Stepper("Shots: \(stripShotCount)", value: $stripShotCount, in: 2...4)
+                        Text("Shot counts offered")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        ForEach([2, 3, 4, 5, 6], id: \.self) { count in
+                            Toggle("\(count) shots", isOn: Binding(
+                                get: { stripShotCounts.contains(count) },
+                                set: { isOn in
+                                    if isOn { stripShotCounts.insert(count) } else { stripShotCounts.remove(count) }
+                                }
+                            ))
+                        }
                         Picker("Layout", selection: $stripLayout) {
                             Text("Vertical").tag(EventConfig.StripOptions.Layout.vertical)
                             Text("Horizontal").tag(EventConfig.StripOptions.Layout.horizontal)
@@ -248,7 +260,7 @@ struct AdminView: View {
         printLimitCount = current.print.limitPerGuest ?? 1
         overlayEnabled = current.overlay.enabled
         stripEnabled = current.strip.enabled
-        stripShotCount = current.strip.shotCount
+        stripShotCounts = Set(current.strip.shotCounts)
         stripLayout = current.strip.layout
         squareCrop = current.squareCrop
     }
@@ -263,7 +275,11 @@ struct AdminView: View {
             share: .init(airdrop: airdrop, qrGallery: qrGallery, email: email),
             print: .init(enabled: printEnabled, limitPerGuest: limitPrints ? printLimitCount : nil),
             overlay: .init(enabled: overlayEnabled, assetName: overlayEnabled ? "overlay.png" : nil),
-            strip: .init(enabled: stripEnabled, shotCount: stripShotCount, layout: stripLayout),
+            strip: .init(
+                enabled: stripEnabled,
+                shotCounts: stripShotCounts.isEmpty ? [3] : stripShotCounts.sorted(),
+                layout: stripLayout
+            ),
             squareCrop: squareCrop
         )
         do {

@@ -33,15 +33,21 @@ struct AttractView: View {
 
                 if model.config.strip.enabled {
                     // Strip mode is available for this event but shouldn't
-                    // force every guest into it — let each guest pick per
-                    // session instead of baking one layout into the config.
-                    HStack(spacing: 40) {
-                        DialButton(label: "Single Photo", systemImage: "camera", diameter: 96) {
-                            model.tapToStart(wantsStrip: false)
+                    // force every guest into one fixed count — every count
+                    // the event offers (e.g. 3-shot and 4-shot both) gets
+                    // its own button, plus Single, so the guest picks.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 32) {
+                            DialButton(label: "Single Photo", systemImage: "camera", diameter: 92) {
+                                model.tapToStart()
+                            }
+                            ForEach(model.config.strip.shotCounts.sorted(), id: \.self) { count in
+                                DialButton(label: "\(count)-Shot Strip", systemImage: "photo.stack.fill", diameter: 92) {
+                                    model.tapToStart(stripShotCount: count)
+                                }
+                            }
                         }
-                        DialButton(label: "Photo Strip", systemImage: "photo.stack.fill", diameter: 96) {
-                            model.tapToStart(wantsStrip: true)
-                        }
+                        .padding(.horizontal, 24)
                     }
                 } else {
                     // Shutter-ring start control: outer hairline ring, accent

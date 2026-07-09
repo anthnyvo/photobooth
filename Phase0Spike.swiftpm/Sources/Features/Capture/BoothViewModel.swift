@@ -35,8 +35,8 @@ public final class BoothViewModel: ObservableObject {
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
     private var returnToAttractTask: Task<Void, Never>?
-    /// Set once per guest by tapToStart(wantsStrip:) and reused by retake()
-    /// so a retake redoes the same layout the guest originally picked.
+    /// Set once per guest by tapToStart(stripShotCount:) and reused by
+    /// retake() so a retake redoes the same layout the guest originally picked.
     private var sessionShotCount = 1
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
@@ -159,18 +159,19 @@ public final class BoothViewModel: ObservableObject {
 
     // MARK: - Guest flow
 
-    /// `wantsStrip` is the guest's choice at the attract screen — the event
-    /// config only controls whether strip mode is *offered* at all
-    /// (AttractView shows a Single/Strip choice when config.strip.enabled,
-    /// otherwise just today's single tap-to-start); it doesn't force every
-    /// guest into the same layout. Doesn't start the countdown directly —
-    /// moves to a "Touch to Shoot" screen first so the guest has a moment to
-    /// pose instead of the countdown firing the instant they pick a mode.
-    public func tapToStart(wantsStrip: Bool = false) {
+    /// `stripShotCount` is the guest's choice at the attract screen — nil
+    /// means a plain single photo; a number picks one of the event's
+    /// offered strip counts (config.strip.shotCounts, e.g. 3 or 4 both
+    /// available side by side). The event config only controls which
+    /// counts are *offered*, not which one every guest is forced into.
+    /// Doesn't start the countdown directly — moves to a "Touch to Shoot"
+    /// screen first so the guest has a moment to pose instead of the
+    /// countdown firing the instant they pick a mode.
+    public func tapToStart(stripShotCount: Int? = nil) {
         guard step == .attract else { return }
         returnToAttractTask?.cancel()
         EventStorage.shared.recordGuestSession(eventId: config.eventId)
-        sessionShotCount = wantsStrip ? max(2, config.strip.shotCount) : 1
+        self.sessionShotCount = stripShotCount.map { max(2, $0) } ?? 1
         step = .readyToShoot
     }
 

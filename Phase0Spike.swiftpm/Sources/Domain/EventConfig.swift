@@ -58,7 +58,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
     }
 
     /// Multiple shots composited into one photo instead of a single shot.
-    /// shotCount/layout are only meaningful while enabled.
+    /// shotCounts/layout are only meaningful while enabled. Guests pick
+    /// among the offered counts at the attract screen — this isn't one
+    /// fixed number, so a 3-shot and a 4-shot strip can both be offered
+    /// side by side at the same event.
     public struct StripOptions: Codable, Sendable, Equatable {
         public enum Layout: String, Codable, Sendable, CaseIterable {
             /// Classic photobooth strip — shots stacked top to bottom.
@@ -71,32 +74,48 @@ public struct EventConfig: Codable, Sendable, Equatable {
         }
 
         public var enabled: Bool
-        public var shotCount: Int
+        /// The shot-count options offered at the attract screen — e.g. [3, 4]
+        /// shows both a "3-Shot" and a "4-Shot" button. Always non-empty
+        /// while enabled; falls back to [3] if a config somehow ends up empty.
+        public var shotCounts: [Int]
         public var layout: Layout
 
-        public init(enabled: Bool = false, shotCount: Int = 3, layout: Layout = .vertical) {
+        public init(enabled: Bool = false, shotCounts: [Int] = [3], layout: Layout = .vertical) {
             self.enabled = enabled
-            self.shotCount = shotCount
+            self.shotCounts = shotCounts
             self.layout = layout
         }
 
         public static let `default` = StripOptions()
 
-        // `layout` decodes leniently — existing config.json files already
-        // have a "strip" object (from before layout existed) with just
-        // enabled/shotCount, and a synthesized Decodable would throw trying
-        // to decode that object rather than skip it, unlike EventConfig's
-        // outer decodeIfPresent which only guards against the whole key
-        // being absent.
+        // Decodes leniently — existing config.json files predate both
+        // `layout` and this multi-count `shotCounts` (they have a single
+        // "shotCount" int instead), and a synthesized Decodable would throw
+        // trying to decode that shape rather than skip it, unlike
+        // EventConfig's outer decodeIfPresent which only guards against the
+        // whole "strip" key being absent.
         private enum CodingKeys: String, CodingKey {
-            case enabled, shotCount, layout
+            case enabled, shotCount, shotCounts, layout
         }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             enabled = try container.decode(Bool.self, forKey: .enabled)
-            shotCount = try container.decode(Int.self, forKey: .shotCount)
+            if let counts = try container.decodeIfPresent([Int].self, forKey: .shotCounts), !counts.isEmpty {
+                shotCounts = counts
+            } else if let legacyCount = try container.decodeIfPresent(Int.self, forKey: .shotCount) {
+                shotCounts = [legacyCount]
+            } else {
+                shotCounts = [3]
+            }
             layout = try container.decodeIfPresent(Layout.self, forKey: .layout) ?? .vertical
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(enabled, forKey: .enabled)
+            try container.encode(shotCounts, forKey: .shotCounts)
+            try container.encode(layout, forKey: .layout)
         }
     }
 
