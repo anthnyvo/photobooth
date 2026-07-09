@@ -37,6 +37,7 @@ struct AdminView: View {
     @State private var selectedOverlay: PhotosPickerItem?
     @State private var overlayData: Data?
     @State private var saveMessage: String?
+    @State private var showingDeleteConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -129,6 +130,15 @@ struct AdminView: View {
                 }
                 .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
+                if mode == .edit {
+                    Section {
+                        Button("Delete Event", role: .destructive) {
+                            showingDeleteConfirm = true
+                        }
+                    }
+                    .listRowBackground(Rectangle().fill(.ultraThinMaterial))
+                }
+
                 if let saveMessage {
                     Text(saveMessage)
                         .foregroundStyle(.green)
@@ -157,6 +167,14 @@ struct AdminView: View {
                 if mode == .edit {
                     loadCurrent()
                 }
+            }
+            .confirmationDialog(
+                "Delete \"\(displayName)\"? This removes its photos and settings permanently.",
+                isPresented: $showingDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Event", role: .destructive, action: deleteEvent)
+                Button("Cancel", role: .cancel) {}
             }
         }
     }
@@ -236,6 +254,15 @@ struct AdminView: View {
         } catch {
             saveMessage = "Save failed: \(error)"
         }
+    }
+
+    /// Deletes the active event on disk, then backs out to the event
+    /// picker — there's no valid "current" event left to fall back into.
+    private func deleteEvent() {
+        let idToDelete = model.config.eventId
+        try? EventStorage.shared.deleteEvent(idToDelete)
+        model.backToEventPicker()
+        dismiss()
     }
 }
 
