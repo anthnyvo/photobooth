@@ -22,6 +22,16 @@ struct ReadyToShootView: View {
             }
 
             VStack {
+                HStack {
+                    BackButton { model.cancelReadyToShoot() }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                Spacer()
+            }
+
+            VStack {
                 Spacer()
                 ZStack {
                     Circle()

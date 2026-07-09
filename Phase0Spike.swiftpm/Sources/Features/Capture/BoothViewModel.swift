@@ -57,6 +57,21 @@ public final class BoothViewModel: ObservableObject {
         step = .connecting
     }
 
+    /// Attendant backs out of camera-connect to switch events — tears down
+    /// any in-flight connect attempt so a stray transport doesn't linger.
+    public func backToEventPicker() {
+        eventConsumer?.cancel()
+        eventConsumer = nil
+        let staleTransport = transport
+        transport = nil
+        camera = nil
+        Task { await staleTransport?.disconnect() }
+        liveViewImage = nil
+        lastError = nil
+        connectionMessage = "Enter the camera's IP and connect"
+        step = .eventPicker
+    }
+
     // MARK: - Connection (attendant setup step)
 
     public func connectCamera() {
@@ -143,6 +158,14 @@ public final class BoothViewModel: ObservableObject {
         guard step == .readyToShoot else { return }
         returnToAttractTask?.cancel()
         beginCountdown()
+    }
+
+    /// Manual bail from Touch to Shoot back to attract — otherwise the only
+    /// way out is touching to shoot or waiting for the 15s auto-return.
+    public func cancelReadyToShoot() {
+        guard step == .readyToShoot else { return }
+        returnToAttractTask?.cancel()
+        step = .attract
     }
 
     /// Kicks off `sessionShotCount` shots in sequence (1 for a normal photo,

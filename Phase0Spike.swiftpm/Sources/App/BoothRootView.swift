@@ -58,6 +58,17 @@ private struct ConnectView: View {
     var body: some View {
         ZStack {
             ChassisBackground()
+
+            VStack {
+                HStack {
+                    BackButton { model.backToEventPicker() }
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+
             VStack(spacing: 24) {
                 ZStack {
                     Circle()
@@ -114,9 +125,7 @@ private struct ConnectView: View {
                         .padding(.horizontal, 40)
                 }
 
-                Button("Event Setup") { showAdmin = true }
-                    .font(.footnote)
-                    .foregroundStyle(Chassis.textSecondary)
+                GhostButton(title: "Event Setup") { showAdmin = true }
                     .padding(.top, 20)
             }
         }

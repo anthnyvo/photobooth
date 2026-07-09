@@ -60,9 +60,7 @@ struct PINGate<Content: View>: View {
 
                         PillButton(title: "Unlock", action: check)
 
-                        Button("Cancel") { dismiss() }
-                            .font(.footnote)
-                            .foregroundStyle(Chassis.textSecondary)
+                        GhostButton(title: "Cancel") { dismiss() }
                     }
                     .padding(28)
                     .chassisPanel()

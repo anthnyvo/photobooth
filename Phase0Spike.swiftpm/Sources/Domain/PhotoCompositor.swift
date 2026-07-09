@@ -13,7 +13,7 @@ enum PhotoCompositor {
     static func applyOverlay(to photoData: Data, config: EventConfig) -> Data {
         guard config.overlay.enabled,
               let assetName = config.overlay.assetName,
-              let base = UIImage(data: photoData) else {
+              let base = UIImage(data: photoData)?.downscaled(maxWidth: 1600) else {
             return photoData
         }
         let overlayURL = EventStorage.shared.assetURL(eventId: config.eventId, filename: assetName)
@@ -70,8 +70,14 @@ enum PhotoCompositor {
     /// Applied last, after overlay/strip compositing, so every saved photo
     /// gets the same physical-print look wherever it ends up: review,
     /// share, or print.
+    ///
+    /// Downscales first — this runs on *every* capture now, including a
+    /// plain single shot, which (unlike the strip path) was never
+    /// downscaled before. Rendering a fresh canvas at the EOS R's native
+    /// ~6000px width was the single-photo crash: same OOM/watchdog class as
+    /// the strip crash, just hitting the one path that never got the fix.
     static func addPolaroidFrame(to photoData: Data) -> Data {
-        guard let image = UIImage(data: photoData) else { return photoData }
+        guard let image = UIImage(data: photoData)?.downscaled(maxWidth: 1600) else { return photoData }
         let sideBorder = image.size.width * 0.045
         let topBorder = sideBorder
         let bottomBorder = image.size.width * 0.16

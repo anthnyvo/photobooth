@@ -152,6 +152,46 @@ struct DialButton: View {
     }
 }
 
+/// Small glassy circular back button — chevron on a dark glass disc.
+/// Callers place it top-leading with their own safe-area padding.
+struct BackButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Chassis.textPrimary)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Chassis.card.opacity(0.86)))
+                .overlay(Circle().strokeBorder(Chassis.hairline, lineWidth: 1))
+                .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Low-key glassy text button — for secondary actions (Cancel, links) that
+/// don't warrant a full-weight PillButton but still shouldn't be bare
+/// system-styled text.
+struct GhostButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Chassis.textSecondary)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 20)
+                .background(Capsule().fill(Chassis.card.opacity(0.6)))
+                .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 extension Color {
     init?(hex: String) {
         var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
