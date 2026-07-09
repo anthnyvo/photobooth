@@ -283,11 +283,14 @@ public final class BoothViewModel: ObservableObject {
         let currentConfig = config
         Task {
             let branded = await Task.detached(priority: .userInitiated) {
-                let composited: Data
+                var composited: Data
                 if shots.count > 1 {
-                    composited = PhotoCompositor.compositeStrip(shots) ?? firstShot
+                    composited = PhotoCompositor.compositeStrip(shots, layout: currentConfig.strip.layout) ?? firstShot
                 } else {
                     composited = firstShot
+                }
+                if currentConfig.squareCrop {
+                    composited = PhotoCompositor.applySquareCrop(to: composited)
                 }
                 let branded = PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
                 return PhotoCompositor.addPolaroidFrame(to: branded)

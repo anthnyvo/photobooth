@@ -57,18 +57,47 @@ public struct EventConfig: Codable, Sendable, Equatable {
         public static let `default` = OverlayOptions()
     }
 
-    /// Multiple shots composited into one vertical strip instead of a single
-    /// photo. shotCount is only meaningful while enabled.
+    /// Multiple shots composited into one photo instead of a single shot.
+    /// shotCount/layout are only meaningful while enabled.
     public struct StripOptions: Codable, Sendable, Equatable {
+        public enum Layout: String, Codable, Sendable, CaseIterable {
+            /// Classic photobooth strip — shots stacked top to bottom.
+            case vertical
+            /// Shots side by side — good for a 2-shot "duo" pair or a wide
+            /// group shot.
+            case horizontal
+            /// Shots arranged in a roughly square grid (ceil(sqrt(n)) columns).
+            case grid
+        }
+
         public var enabled: Bool
         public var shotCount: Int
+        public var layout: Layout
 
-        public init(enabled: Bool = false, shotCount: Int = 3) {
+        public init(enabled: Bool = false, shotCount: Int = 3, layout: Layout = .vertical) {
             self.enabled = enabled
             self.shotCount = shotCount
+            self.layout = layout
         }
 
         public static let `default` = StripOptions()
+
+        // `layout` decodes leniently — existing config.json files already
+        // have a "strip" object (from before layout existed) with just
+        // enabled/shotCount, and a synthesized Decodable would throw trying
+        // to decode that object rather than skip it, unlike EventConfig's
+        // outer decodeIfPresent which only guards against the whole key
+        // being absent.
+        private enum CodingKeys: String, CodingKey {
+            case enabled, shotCount, layout
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            enabled = try container.decode(Bool.self, forKey: .enabled)
+            shotCount = try container.decode(Int.self, forKey: .shotCount)
+            layout = try container.decodeIfPresent(Layout.self, forKey: .layout) ?? .vertical
+        }
     }
 
     public var eventId: String
@@ -82,6 +111,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
     public var print: PrintOptions
     public var overlay: OverlayOptions
     public var strip: StripOptions
+    /// Crops the final photo (single or strip) to a centered square before
+    /// the Polaroid frame — independent of strip layout, so it applies to
+    /// either a single shot or a composited strip.
+    public var squareCrop: Bool
     public var createdAt: Date
 
     public init(
@@ -95,6 +128,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         print: PrintOptions = PrintOptions(),
         overlay: OverlayOptions = OverlayOptions(),
         strip: StripOptions = StripOptions(),
+        squareCrop: Bool = false,
         createdAt: Date = Date()
     ) {
         self.eventId = eventId
@@ -107,6 +141,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.print = print
         self.overlay = overlay
         self.strip = strip
+        self.squareCrop = squareCrop
         self.createdAt = createdAt
     }
 
@@ -123,7 +158,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, createdAt
+        case share, print, overlay, strip, squareCrop, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -138,6 +173,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         print = try container.decode(PrintOptions.self, forKey: .print)
         overlay = try container.decodeIfPresent(OverlayOptions.self, forKey: .overlay) ?? .default
         strip = try container.decodeIfPresent(StripOptions.self, forKey: .strip) ?? .default
+        squareCrop = try container.decodeIfPresent(Bool.self, forKey: .squareCrop) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -153,6 +189,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(print, forKey: .print)
         try container.encode(overlay, forKey: .overlay)
         try container.encode(strip, forKey: .strip)
+        try container.encode(squareCrop, forKey: .squareCrop)
         try container.encode(createdAt, forKey: .createdAt)
     }
 }

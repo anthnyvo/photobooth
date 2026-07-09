@@ -32,6 +32,8 @@ struct AdminView: View {
     @State private var overlayEnabled = false
     @State private var stripEnabled = false
     @State private var stripShotCount = 3
+    @State private var stripLayout: EventConfig.StripOptions.Layout = .vertical
+    @State private var squareCrop = false
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
     @State private var selectedOverlay: PhotosPickerItem?
@@ -84,7 +86,20 @@ struct AdminView: View {
                     Toggle("Enable photo strip", isOn: $stripEnabled)
                     if stripEnabled {
                         Stepper("Shots: \(stripShotCount)", value: $stripShotCount, in: 2...4)
+                        Picker("Layout", selection: $stripLayout) {
+                            Text("Vertical").tag(EventConfig.StripOptions.Layout.vertical)
+                            Text("Horizontal").tag(EventConfig.StripOptions.Layout.horizontal)
+                            Text("Grid").tag(EventConfig.StripOptions.Layout.grid)
+                        }
                     }
+                }
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
+
+                Section("Output Format") {
+                    Toggle("Square crop (1:1)", isOn: $squareCrop)
+                    Text("Applies to single photos and strips alike, before the Polaroid frame.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
@@ -234,6 +249,8 @@ struct AdminView: View {
         overlayEnabled = current.overlay.enabled
         stripEnabled = current.strip.enabled
         stripShotCount = current.strip.shotCount
+        stripLayout = current.strip.layout
+        squareCrop = current.squareCrop
     }
 
     private func save() {
@@ -246,7 +263,8 @@ struct AdminView: View {
             share: .init(airdrop: airdrop, qrGallery: qrGallery, email: email),
             print: .init(enabled: printEnabled, limitPerGuest: limitPrints ? printLimitCount : nil),
             overlay: .init(enabled: overlayEnabled, assetName: overlayEnabled ? "overlay.png" : nil),
-            strip: .init(enabled: stripEnabled, shotCount: stripShotCount)
+            strip: .init(enabled: stripEnabled, shotCount: stripShotCount, layout: stripLayout),
+            squareCrop: squareCrop
         )
         do {
             try EventStorage.shared.createEvent(config)
