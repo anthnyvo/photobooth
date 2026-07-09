@@ -121,27 +121,35 @@ struct PillButton: View {
 
 /// Circular icon control: dark glassy disc with an icon, uppercase caption
 /// beneath. `accent` fills the disc with the accent color and flips the icon
-/// to black — the bright circular action button look.
+/// to black — the bright circular action button look. `isSelected` renders
+/// the same inverted look in white, for pick-then-confirm flows where
+/// tapping marks a choice rather than firing an action.
 struct DialButton: View {
     let label: String
     let systemImage: String
     var accent: Color? = nil
+    var isSelected: Bool = false
     var diameter: CGFloat = 84
     let action: () -> Void
+
+    private var fill: AnyShapeStyle {
+        if isSelected { return AnyShapeStyle(Color.white) }
+        return accent.map(AnyShapeStyle.init) ?? AnyShapeStyle(.ultraThinMaterial)
+    }
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(accent.map(AnyShapeStyle.init) ?? AnyShapeStyle(.ultraThinMaterial))
-                    if accent == nil {
+                        .fill(fill)
+                    if accent == nil && !isSelected {
                         Circle()
                             .strokeBorder(Chassis.hairline, lineWidth: 1)
                     }
                     Image(systemName: systemImage)
                         .font(.system(size: diameter * 0.3, weight: .medium))
-                        .foregroundStyle(accent != nil ? Color.black : Chassis.textPrimary)
+                        .foregroundStyle(accent != nil || isSelected ? Color.black : Chassis.textPrimary)
                 }
                 .frame(width: diameter, height: diameter)
                 .shadow(color: .black.opacity(0.4), radius: 10, y: 4)

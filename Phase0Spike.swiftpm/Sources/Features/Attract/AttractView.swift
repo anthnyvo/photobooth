@@ -6,6 +6,9 @@ import SwiftUI
 struct AttractView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
+    /// Pick-then-confirm: tapping a mode highlights it; only the Start pill
+    /// actually begins the session. nil count = Single Photo (the default).
+    @State private var selectedOption: StripOption?
 
     var body: some View {
         ZStack {
@@ -36,15 +39,17 @@ struct AttractView: View {
                     // force every guest into one fixed count/layout — every
                     // combination the event offers (e.g. 3-shot and 4-shot,
                     // vertical/horizontal/grid) gets its own button, plus
-                    // Single, so the guest picks.
+                    // Single. Tapping highlights the pick; the Start pill
+                    // below confirms it, so guests can browse without the
+                    // countdown flow firing on the first touch.
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 32) {
-                            DialButton(label: "Single Photo", systemImage: "camera", diameter: 92) {
-                                model.tapToStart()
+                            DialButton(label: "Single Photo", systemImage: "camera", isSelected: selectedOption == nil, diameter: 92) {
+                                selectedOption = nil
                             }
                             ForEach(stripOptions) { option in
-                                DialButton(label: option.label, systemImage: "photo.stack.fill", diameter: 92) {
-                                    model.tapToStart(stripShotCount: option.count, layout: option.layout)
+                                DialButton(label: option.label, systemImage: "photo.stack.fill", isSelected: selectedOption == option, diameter: 92) {
+                                    selectedOption = option
                                 }
                             }
                         }
@@ -109,6 +114,20 @@ struct AttractView: View {
                     }
                     .padding(.top, 4)
                 }
+
+                if model.config.strip.enabled {
+                    // The confirm step — mode/filter taps above only mark a
+                    // choice, this actually starts the session.
+                    PillButton(title: "Start") {
+                        if let option = selectedOption {
+                            model.tapToStart(stripShotCount: option.count, layout: option.layout)
+                        } else {
+                            model.tapToStart()
+                        }
+                        selectedOption = nil
+                    }
+                    .padding(.top, 8)
+                }
                 Spacer()
             }
 
@@ -147,7 +166,7 @@ struct AttractView: View {
         }
     }
 
-    private struct StripOption: Identifiable {
+    private struct StripOption: Identifiable, Equatable {
         let count: Int
         let layout: EventConfig.StripOptions.Layout
 
