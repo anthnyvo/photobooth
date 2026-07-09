@@ -40,13 +40,21 @@ public enum RemoteSync {
     }
 
     /// Deletes any locally-cached event that was itself pulled from the
-    /// backend (`isRemote`) but is no longer in the operator's current
-    /// event list — e.g. deleted on the dashboard. Purely local,
-    /// admin-created events (isRemote == false) are never touched by sync.
+    /// backend but is no longer in the operator's current event list —
+    /// e.g. deleted on the dashboard. Purely local, admin-created events
+    /// are never touched by sync.
+    ///
+    /// Sync-owned is `isRemote || UUID(uuidString: eventId) != nil`, not
+    /// just the flag: a config cached by a build from before `isRemote`
+    /// existed decodes that key as false (the lenient-decode default),
+    /// which would make an already-deleted-on-the-dashboard event
+    /// unprunable forever. Supabase event ids are always UUIDs and an
+    /// attendant-typed local slug essentially never parses as one, so this
+    /// fallback catches those pre-existing caches too.
     private static func prune(keeping remoteIds: Set<String>) {
-        for eventId in EventStorage.shared.listEventIds() {
+        for eventId in EventStorage.shared.listEventIds() where !remoteIds.contains(eventId) {
             guard let local = try? EventStorage.shared.load(eventId),
-                  local.isRemote, !remoteIds.contains(eventId) else { continue }
+                  local.isRemote || UUID(uuidString: eventId) != nil else { continue }
             try? EventStorage.shared.deleteEvent(eventId)
         }
     }
