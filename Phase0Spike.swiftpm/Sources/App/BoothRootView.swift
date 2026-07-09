@@ -12,6 +12,8 @@ struct BoothRootView: View {
             let theme = Theme(model.config)
 
             switch model.step {
+            case .home:
+                HomeView(model: model)
             case .eventPicker:
                 EventPickerView(model: model)
             case .connecting:

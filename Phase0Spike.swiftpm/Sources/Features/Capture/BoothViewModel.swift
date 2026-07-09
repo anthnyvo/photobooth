@@ -5,6 +5,7 @@ import SwiftUI
 /// SpikeViewModel — this one drives the actual booth experience, reusing the
 /// same CameraKit transport/protocol layer proven out in Phase 0.
 public enum BoothStep: Equatable {
+    case home
     case eventPicker
     case connecting
     case attract
@@ -17,7 +18,7 @@ public enum BoothStep: Equatable {
 
 @MainActor
 public final class BoothViewModel: ObservableObject {
-    @Published public private(set) var step: BoothStep = .eventPicker
+    @Published public private(set) var step: BoothStep = .home
     @Published public private(set) var config: EventConfig
     @Published public var liveViewImage: UIImage?
     @Published public var cameraIPText: String = "192.168.1.2"
@@ -61,7 +62,13 @@ public final class BoothViewModel: ObservableObject {
         cameraIPText.hasPrefix("192.168.1.")
     }
 
-    // MARK: - Event picker (home screen)
+    // MARK: - Home / event picker
+
+    /// Leaves the splash screen for the event list.
+    public func enterEventPicker() {
+        guard step == .home else { return }
+        step = .eventPicker
+    }
 
     /// Switches the active event and proceeds to the camera-connect step.
     /// Loading failure (corrupt/missing config.json) is treated as "ignore
