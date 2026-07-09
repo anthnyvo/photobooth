@@ -20,22 +20,15 @@ struct CaptureView: View {
 
             switch model.step {
             case .countdown(let remaining):
-                // Number sits inside a faint dial ring — matches the chassis
-                // styling without hurting the from-a-few-feet readability the
-                // giant numeral exists for.
-                ZStack {
-                    Circle()
-                        .fill(Chassis.base.opacity(0.35))
-                    Circle()
-                        .strokeBorder(.white.opacity(0.35), lineWidth: 2)
-                    Text("\(remaining)")
-                        .font(.system(size: 190, weight: .heavy, design: .rounded))
-                        .foregroundStyle(.white)
-                        .shadow(color: .black.opacity(0.6), radius: 12)
-                        .id(remaining)
-                }
-                .frame(width: 300, height: 300)
-                .transition(.scale.combined(with: .opacity))
+                // No background ring — it obstructed the live view guests
+                // are trying to pose against. Just the numeral, high
+                // contrast, still readable from a few feet back.
+                Text("\(remaining)")
+                    .font(.system(size: 190, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.7), radius: 14)
+                    .id(remaining)
+                    .transition(.scale.combined(with: .opacity))
             case .capturing:
                 Color.white.ignoresSafeArea()
                     .opacity(0.9)

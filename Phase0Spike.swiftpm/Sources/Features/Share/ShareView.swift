@@ -51,7 +51,7 @@ struct ShareView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    if model.config.share.qrGallery {
+                    if model.config.share.qrGallery && !model.cameraIsSelfHostedAP {
                         DialButton(label: "QR Code", systemImage: "qrcode") {
                             presentQR()
                         }

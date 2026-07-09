@@ -50,7 +50,7 @@ struct ReadyToShootView: View {
                 .padding(.bottom, 18)
 
                 ChassisLabel(text: "Touch to Shoot")
-                    .padding(.bottom, 56)
+                Spacer()
             }
         }
         .statusBarHidden()

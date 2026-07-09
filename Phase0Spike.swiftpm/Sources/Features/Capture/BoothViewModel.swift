@@ -44,6 +44,19 @@ public final class BoothViewModel: ObservableObject {
         config = EventStorage.shared.loadCurrentOrDefault()
     }
 
+    /// QR sharing needs this device and the guest's phone on the same
+    /// network, which only happens when the camera is joined to the venue's
+    /// own Wi-Fi (infrastructure mode) — not when it's creating its own
+    /// private access point. There's no direct API for "is this an AP I
+    /// joined vs. a router-issued network," so this leans on the one signal
+    /// available: the camera's private-AP default is always 192.168.1.x
+    /// (also this app's placeholder default), so an IP in that subnet reads
+    /// as "camera's own AP" and QR gets hidden rather than offering a share
+    /// option that can't actually reach the guest's phone.
+    public var cameraIsSelfHostedAP: Bool {
+        cameraIPText.hasPrefix("192.168.1.")
+    }
+
     // MARK: - Event picker (home screen)
 
     /// Switches the active event and proceeds to the camera-connect step.
