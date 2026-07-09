@@ -44,6 +44,19 @@ public final class BoothViewModel: ObservableObject {
         config = EventStorage.shared.loadCurrentOrDefault()
     }
 
+    /// QR sharing needs this device and the guest's phone on the same
+    /// network, which only happens when the camera is joined to the venue's
+    /// own Wi-Fi (infrastructure mode) — not when it's creating its own
+    /// private access point. There's no direct API for "is this an AP I
+    /// joined vs. a router-issued network," so this leans on the one signal
+    /// available: the camera's private-AP default is always 192.168.1.x
+    /// (also this app's placeholder default), so an IP in that subnet reads
+    /// as "camera's own AP" and QR gets hidden rather than offering a share
+    /// option that can't actually reach the guest's phone.
+    public var cameraIsSelfHostedAP: Bool {
+        cameraIPText.hasPrefix("192.168.1.")
+    }
+
     // MARK: - Event picker (home screen)
 
     /// Switches the active event and proceeds to the camera-connect step.
@@ -55,6 +68,21 @@ public final class BoothViewModel: ObservableObject {
         EventStorage.shared.setCurrentEventId(eventId)
         config = selected
         step = .connecting
+    }
+
+    /// Attendant backs out of camera-connect to switch events — tears down
+    /// any in-flight connect attempt so a stray transport doesn't linger.
+    public func backToEventPicker() {
+        eventConsumer?.cancel()
+        eventConsumer = nil
+        let staleTransport = transport
+        transport = nil
+        camera = nil
+        Task { await staleTransport?.disconnect() }
+        liveViewImage = nil
+        lastError = nil
+        connectionMessage = "Enter the camera's IP and connect"
+        step = .eventPicker
     }
 
     // MARK: - Connection (attendant setup step)
@@ -143,6 +171,14 @@ public final class BoothViewModel: ObservableObject {
         guard step == .readyToShoot else { return }
         returnToAttractTask?.cancel()
         beginCountdown()
+    }
+
+    /// Manual bail from Touch to Shoot back to attract — otherwise the only
+    /// way out is touching to shoot or waiting for the 15s auto-return.
+    public func cancelReadyToShoot() {
+        guard step == .readyToShoot else { return }
+        returnToAttractTask?.cancel()
+        step = .attract
     }
 
     /// Kicks off `sessionShotCount` shots in sequence (1 for a normal photo,
@@ -245,7 +281,8 @@ public final class BoothViewModel: ObservableObject {
                 } else {
                     composited = firstShot
                 }
-                return PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+                let branded = PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+                return PhotoCompositor.addPolaroidFrame(to: branded)
             }.value
             do {
                 let url = try EventStorage.shared.savePhoto(branded, eventId: currentConfig.eventId)

@@ -11,7 +11,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         public var primaryHex: String
         public var backgroundHex: String
 
-        public init(primaryHex: String = "#2563EB", backgroundHex: String = "#0B0F19") {
+        public init(primaryHex: String = "#DBF24F", backgroundHex: String = "#0B0F19") {
             self.primaryHex = primaryHex
             self.backgroundHex = backgroundHex
         }

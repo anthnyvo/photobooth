@@ -59,6 +59,19 @@ public final class EventStorage {
         return try decoder.decode(EventConfig.self, from: data)
     }
 
+    /// Deletes an event's whole folder (config, assets, photos) and its
+    /// counters. Clears the current-event pointer if it pointed at this
+    /// event — callers should route back to the event picker afterward
+    /// since there's no longer a valid "current" event.
+    public func deleteEvent(_ eventId: String) throws {
+        try fileManager.removeItem(at: eventDirectory(eventId))
+        UserDefaults.standard.removeObject(forKey: printCountKey(eventId))
+        UserDefaults.standard.removeObject(forKey: guestSessionCountKey(eventId))
+        if currentEventId() == eventId {
+            UserDefaults.standard.removeObject(forKey: currentEventKey)
+        }
+    }
+
     public func listEventIds() -> [String] {
         (try? fileManager.contentsOfDirectory(at: eventsRoot, includingPropertiesForKeys: nil))?
             .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }

@@ -10,7 +10,7 @@ struct EventPickerView: View {
 
     var body: some View {
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
             VStack(spacing: 24) {
                 ChassisLabel(text: "Select Event", size: 16)
                     .padding(.top, 60)
@@ -47,15 +47,9 @@ struct EventPickerView: View {
                     }
                 }
 
-                Button {
+                PillButton(title: "+ New Event") {
                     showingNewEvent = true
-                } label: {
-                    ChassisLabel(text: "+ New Event", size: 13)
-                        .padding(.vertical, 14)
-                        .padding(.horizontal, 28)
-                        .chassisPanel(cornerRadius: 24)
                 }
-                .buttonStyle(.plain)
                 .padding(.bottom, 40)
             }
         }

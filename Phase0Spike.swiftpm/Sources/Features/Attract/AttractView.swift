@@ -9,7 +9,7 @@ struct AttractView: View {
 
     var body: some View {
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
 
             if let frame = model.liveViewImage {
                 Image(uiImage: frame)
@@ -30,25 +30,19 @@ struct AttractView: View {
                             .frame(maxHeight: 140)
                     }
                 }
-                Text(model.config.displayName)
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundStyle(Chassis.textPrimary)
-                    .shadow(color: .black.opacity(0.6), radius: 8)
-                Spacer()
 
                 if model.config.strip.enabled {
                     // Strip mode is available for this event but shouldn't
                     // force every guest into it — let each guest pick per
                     // session instead of baking one layout into the config.
                     HStack(spacing: 40) {
-                        DialButton(label: "Single Photo", systemImage: "camera.fill", accent: theme.primary, diameter: 96) {
+                        DialButton(label: "Single Photo", systemImage: "camera", diameter: 96) {
                             model.tapToStart(wantsStrip: false)
                         }
-                        DialButton(label: "Photo Strip", systemImage: "rectangle.grid.1x2.fill", accent: theme.primary, diameter: 96) {
+                        DialButton(label: "Photo Strip", systemImage: "photo.stack.fill", diameter: 96) {
                             model.tapToStart(wantsStrip: true)
                         }
                     }
-                    .padding(.bottom, 56)
                 } else {
                     // Shutter-ring start control: outer hairline ring, accent
                     // inner disc — reads as a camera control, not a web button.
@@ -58,14 +52,14 @@ struct AttractView: View {
                         VStack(spacing: 18) {
                             ZStack {
                                 Circle()
-                                    .fill(Chassis.panel.opacity(0.85))
+                                    .fill(.ultraThinMaterial)
                                 Circle()
                                     .strokeBorder(Chassis.hairline, lineWidth: 1)
                                 Circle()
                                     .strokeBorder(.white.opacity(0.8), lineWidth: 3)
                                     .padding(10)
                                 Circle()
-                                    .fill(theme.primary)
+                                    .fill(Chassis.textPrimary)
                                     .padding(18)
                             }
                             .frame(width: 108, height: 108)
@@ -75,8 +69,8 @@ struct AttractView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, 56)
                 }
+                Spacer()
             }
 
             if let error = model.lastError {

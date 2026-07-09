@@ -13,7 +13,7 @@ enum PhotoCompositor {
     static func applyOverlay(to photoData: Data, config: EventConfig) -> Data {
         guard config.overlay.enabled,
               let assetName = config.overlay.assetName,
-              let base = UIImage(data: photoData) else {
+              let base = UIImage(data: photoData)?.downscaled(maxWidth: 1600) else {
             return photoData
         }
         let overlayURL = EventStorage.shared.assetURL(eventId: config.eventId, filename: assetName)
@@ -62,6 +62,37 @@ enum PhotoCompositor {
             }
         }
         return composited.jpegData(compressionQuality: 0.9)
+    }
+
+    /// Wraps the finished photo (single shot or already-composited strip) in
+    /// a classic Polaroid-style white border — thin on the top/sides,
+    /// noticeably thicker along the bottom (the traditional caption strip).
+    /// Applied last, after overlay/strip compositing, so every saved photo
+    /// gets the same physical-print look wherever it ends up: review,
+    /// share, or print.
+    ///
+    /// Downscales first — this runs on *every* capture now, including a
+    /// plain single shot, which (unlike the strip path) was never
+    /// downscaled before. Rendering a fresh canvas at the EOS R's native
+    /// ~6000px width was the single-photo crash: same OOM/watchdog class as
+    /// the strip crash, just hitting the one path that never got the fix.
+    static func addPolaroidFrame(to photoData: Data) -> Data {
+        guard let image = UIImage(data: photoData)?.downscaled(maxWidth: 1600) else { return photoData }
+        let sideBorder = image.size.width * 0.045
+        let topBorder = sideBorder
+        let bottomBorder = image.size.width * 0.16
+
+        let canvasSize = CGSize(
+            width: image.size.width + sideBorder * 2,
+            height: image.size.height + topBorder + bottomBorder
+        )
+        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        let framed = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: canvasSize))
+            image.draw(at: CGPoint(x: sideBorder, y: topBorder))
+        }
+        return framed.jpegData(compressionQuality: 0.92) ?? photoData
     }
 }
 

@@ -11,7 +11,7 @@ struct ReadyToShootView: View {
 
     var body: some View {
         ZStack {
-            Chassis.base.ignoresSafeArea()
+            ChassisBackground()
 
             if let frame = model.liveViewImage {
                 Image(uiImage: frame)
@@ -22,17 +22,27 @@ struct ReadyToShootView: View {
             }
 
             VStack {
+                HStack {
+                    BackButton { model.cancelReadyToShoot() }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                Spacer()
+            }
+
+            VStack {
                 Spacer()
                 ZStack {
                     Circle()
-                        .fill(Chassis.panel.opacity(0.85))
+                        .fill(.ultraThinMaterial)
                     Circle()
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
                     Circle()
                         .strokeBorder(.white.opacity(0.8), lineWidth: 3)
                         .padding(10)
                     Circle()
-                        .fill(theme.primary)
+                        .fill(Chassis.textPrimary)
                         .padding(18)
                 }
                 .frame(width: 108, height: 108)
@@ -40,7 +50,7 @@ struct ReadyToShootView: View {
                 .padding(.bottom, 18)
 
                 ChassisLabel(text: "Touch to Shoot")
-                    .padding(.bottom, 56)
+                Spacer()
             }
         }
         .statusBarHidden()
