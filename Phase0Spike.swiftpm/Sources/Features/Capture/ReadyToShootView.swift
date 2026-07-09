@@ -42,7 +42,7 @@ struct ReadyToShootView: View {
                         .strokeBorder(.white.opacity(0.8), lineWidth: 3)
                         .padding(10)
                     Circle()
-                        .fill(theme.primary)
+                        .fill(Chassis.textPrimary)
                         .padding(18)
                 }
                 .frame(width: 108, height: 108)
