@@ -40,6 +40,8 @@ struct AdminView: View {
     @State private var squareCrop = false
     @State private var filtersEnabled = true
     @State private var animationsEnabled = true
+    @State private var aiProps = false
+    @State private var aiSmileShutter = false
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
     @State private var selectedOverlay: PhotosPickerItem?
@@ -124,6 +126,18 @@ struct AdminView: View {
                         .foregroundStyle(.secondary)
                     Toggle("Guest filters (Retro, B&W, …)", isOn: $filtersEnabled)
                     Toggle("Boomerang & GIF", isOn: $animationsEnabled)
+                }
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
+
+                Section("AI Features") {
+                    Toggle("Face props (shades, dog ears, …)", isOn: $aiProps)
+                    Text("Guests pick a prop at the start screen — it tracks every detected face and is burned into photos and GIFs.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Toggle("Smile to shoot", isOn: $aiSmileShutter)
+                    Text("The countdown starts automatically when someone smiles on the pose screen. All detection runs on this iPad — nothing is uploaded.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
                 .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
@@ -277,6 +291,8 @@ struct AdminView: View {
         squareCrop = current.squareCrop
         filtersEnabled = current.filtersEnabled
         animationsEnabled = current.animationsEnabled
+        aiProps = current.ai.props
+        aiSmileShutter = current.ai.smileShutter
     }
 
     private func save() {
@@ -296,7 +312,8 @@ struct AdminView: View {
             ),
             squareCrop: squareCrop,
             filtersEnabled: filtersEnabled,
-            animationsEnabled: animationsEnabled
+            animationsEnabled: animationsEnabled,
+            ai: .init(props: aiProps, smileShutter: aiSmileShutter)
         )
         do {
             try EventStorage.shared.createEvent(config)

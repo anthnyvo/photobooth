@@ -129,6 +129,38 @@ struct AttractView: View {
                     .padding(.top, 4)
                 }
 
+                if model.config.ai.props {
+                    // Face-prop chips — same pick-then-shoot pattern as
+                    // filters; anchored to detected faces and burned into
+                    // the file (stills and GIFs alike). Resets per guest.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(PhotoProp.allCases) { prop in
+                                Button {
+                                    model.selectedProp = prop
+                                } label: {
+                                    Text(prop.displayName)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(model.selectedProp == prop ? Color.black : Chassis.textPrimary)
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 18)
+                                        .background(
+                                            Capsule().fill(model.selectedProp == prop
+                                                ? AnyShapeStyle(Color.white)
+                                                : AnyShapeStyle(.ultraThinMaterial))
+                                        )
+                                        .overlay(
+                                            Capsule().strokeBorder(Chassis.hairline, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                    }
+                    .padding(.top, 4)
+                }
+
                 if hasModeChoices {
                     // The confirm step — mode/filter taps above only mark a
                     // choice, this actually starts the session.

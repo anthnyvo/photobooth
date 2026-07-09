@@ -30,11 +30,13 @@ public enum AnimatedStyle: String, CaseIterable, Sendable, Identifiable {
 enum AnimatedCapture {
     /// Encodes live-view JPEG frames into a looping GIF. Boomerang appends
     /// the reversed frames (minus the endpoints, so the turnaround doesn't
-    /// stutter) for the back-and-forth loop. The guest's filter pick is
-    /// applied per frame — overlay/Polaroid are deliberately not: those are
-    /// static-print concepts and would need per-frame compositing for no
-    /// real payoff on a phone-screen GIF.
-    static func encodeGIF(frames: [Data], style: AnimatedStyle, filter: PhotoFilter) -> Data? {
+    /// stutter) for the back-and-forth loop. The guest's filter and face
+    /// prop are applied per frame (prop with the low-accuracy detector —
+    /// live-view frames are small and there are dozens of them) —
+    /// overlay/Polaroid are deliberately not: those are static-print
+    /// concepts and would need per-frame compositing for no real payoff on
+    /// a phone-screen GIF.
+    static func encodeGIF(frames: [Data], style: AnimatedStyle, filter: PhotoFilter, prop: PhotoProp = .none) -> Data? {
         guard !frames.isEmpty else { return nil }
 
         var sequence = frames
@@ -44,7 +46,10 @@ enum AnimatedCapture {
 
         let images: [CGImage] = sequence.compactMap { frameData in
             autoreleasepool {
-                UIImage(data: filter.apply(to: frameData))?.cgImage
+                let propped = prop == .none
+                    ? frameData
+                    : FacePropRenderer.apply(prop, to: frameData, accuracy: .live)
+                return UIImage(data: filter.apply(to: propped))?.cgImage
             }
         }
         guard !images.isEmpty else { return nil }

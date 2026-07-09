@@ -8,6 +8,9 @@ import SwiftUI
 struct ReadyToShootView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
+    @State private var faceCount = 0
+
+    private var smileShutterOn: Bool { model.config.ai.smileShutter }
 
     var body: some View {
         ZStack {
@@ -25,6 +28,19 @@ struct ReadyToShootView: View {
                 HStack {
                     BackButton { model.cancelReadyToShoot() }
                     Spacer()
+                    if smileShutterOn {
+                        HStack(spacing: 8) {
+                            Image(systemName: "face.smiling")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(faceCount == 1 ? "1 face" : "\(faceCount) faces")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .foregroundStyle(Chassis.textPrimary)
+                        .padding(.vertical, 9)
+                        .padding(.horizontal, 14)
+                        .background(Capsule().fill(.ultraThinMaterial))
+                        .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)
@@ -49,7 +65,7 @@ struct ReadyToShootView: View {
                 .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                 .padding(.bottom, 18)
 
-                ChassisLabel(text: "Touch to Shoot")
+                ChassisLabel(text: smileShutterOn ? "Smile to Shoot — or touch" : "Touch to Shoot")
                 Spacer()
             }
         }
@@ -57,5 +73,22 @@ struct ReadyToShootView: View {
         .contentShape(Rectangle())
         .onTapGesture { model.confirmReadyToShoot() }
         .onAppear { model.scheduleAutoReturn(after: 15) }
+        .task {
+            // Smile-shutter poll — ~2 scans/sec on the live feed, cancelled
+            // automatically when this view leaves (touch, back, timeout).
+            // Short arming delay so a guest who was already grinning while
+            // tapping a mode doesn't trigger the countdown instantly.
+            guard smileShutterOn else { return }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            while !Task.isCancelled {
+                let reading = await model.analyzeLiveViewFaces()
+                faceCount = reading.faceCount
+                if reading.smiling {
+                    model.confirmReadyToShoot()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 450_000_000)
+            }
+        }
     }
 }

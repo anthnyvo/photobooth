@@ -172,7 +172,9 @@ enum PhotoCompositor {
     }
 }
 
-private extension UIImage {
+// Internal (not private): FacePropRenderer downscales with the same helper
+// before face detection for the same OOM-avoidance reason.
+extension UIImage {
     func downscaled(maxWidth: CGFloat) -> UIImage {
         guard size.width > maxWidth else { return self }
         let scale = maxWidth / size.width

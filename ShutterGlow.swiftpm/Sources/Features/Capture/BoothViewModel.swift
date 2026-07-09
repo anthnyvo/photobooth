@@ -40,6 +40,10 @@ public final class BoothViewModel: ObservableObject {
     /// Original whenever the booth returns to attract, so one guest's
     /// choice never silently carries over to the next.
     @Published public var selectedFilter: PhotoFilter = .none
+    /// Guest's face-prop pick (shades, dog ears, ...) — anchored to detected
+    /// faces and burned into the file in finishCapture (or per frame for
+    /// Boomerang/GIF). Resets per guest, same as selectedFilter.
+    @Published public var selectedProp: PhotoProp = .none
 
     private var transport: PTPIPTransport?
     private var camera: EOSCamera?
@@ -336,8 +340,9 @@ public final class BoothViewModel: ObservableObject {
         }
 
         let currentFilter = selectedFilter
+        let currentProp = selectedProp
         let gifData = await Task.detached(priority: .userInitiated) {
-            AnimatedCapture.encodeGIF(frames: frames, style: style, filter: currentFilter)
+            AnimatedCapture.encodeGIF(frames: frames, style: style, filter: currentFilter, prop: currentProp)
         }.value
 
         guard let gifData else {
@@ -419,13 +424,22 @@ public final class BoothViewModel: ObservableObject {
         let currentConfig = config
         let currentLayout = sessionLayout
         let currentFilter = selectedFilter
+        let currentProp = selectedProp
         Task {
             let branded = await Task.detached(priority: .userInitiated) {
+                // Props go on per shot, before compositing — faces are at
+                // their largest in the raw frame, and each strip cell gets
+                // its own correctly-anchored prop.
+                let proppedShots = currentProp == .none
+                    ? shots
+                    : shots.map { FacePropRenderer.apply(currentProp, to: $0) }
+                let firstPropped = proppedShots.first ?? firstShot
+
                 var composited: Data
-                if shots.count > 1 {
-                    composited = PhotoCompositor.compositeStrip(shots, layout: currentLayout) ?? firstShot
+                if proppedShots.count > 1 {
+                    composited = PhotoCompositor.compositeStrip(proppedShots, layout: currentLayout) ?? firstPropped
                 } else {
-                    composited = firstShot
+                    composited = firstPropped
                 }
                 // Filter before overlay/frame so the brand overlay and the
                 // Polaroid border stay unfiltered — only the photo content
@@ -462,7 +476,36 @@ public final class BoothViewModel: ObservableObject {
     public func returnToAttract() {
         liveViewImage = liveViewImage // keep last frame visible during transition
         selectedFilter = .none
+        selectedProp = .none
         step = .attract
+    }
+
+    // MARK: - Live face analysis (smile shutter / face count)
+
+    public struct LiveFaceReading: Sendable {
+        public let faceCount: Int
+        public let smiling: Bool
+    }
+
+    /// One low-accuracy face pass over the current live-view frame, off the
+    /// main actor — polled by ReadyToShootView while the smile shutter is
+    /// enabled. Zero faces when live view hasn't produced a frame yet.
+    /// Hands the detached task JPEG bytes rather than a CGImage — Data is
+    /// Sendable, CGImage isn't.
+    public func analyzeLiveViewFaces() async -> LiveFaceReading {
+        guard let jpeg = liveViewImage?.jpegData(compressionQuality: 0.7) else {
+            return LiveFaceReading(faceCount: 0, smiling: false)
+        }
+        return await Task.detached(priority: .utility) {
+            guard let cgImage = UIImage(data: jpeg)?.cgImage else {
+                return LiveFaceReading(faceCount: 0, smiling: false)
+            }
+            let faces = FaceVision.detectFaces(in: cgImage, accuracy: .live)
+            return LiveFaceReading(
+                faceCount: faces.count,
+                smiling: faces.contains(where: \.hasSmile)
+            )
+        }.value
     }
 
     public func scheduleAutoReturn(after seconds: TimeInterval = 20) {

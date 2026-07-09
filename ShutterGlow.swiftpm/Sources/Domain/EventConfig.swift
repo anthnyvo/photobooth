@@ -141,6 +141,22 @@ public struct EventConfig: Codable, Sendable, Equatable {
         }
     }
 
+    /// On-device AI features (CoreImage face detection — nothing leaves
+    /// the iPad). `props` offers face-tracked prop chips (shades, dog
+    /// ears, ...) at the attract screen; `smileShutter` fires the countdown
+    /// automatically when the Touch-to-Shoot screen sees a smile.
+    public struct AIOptions: Codable, Sendable, Equatable {
+        public var props: Bool
+        public var smileShutter: Bool
+
+        public init(props: Bool = false, smileShutter: Bool = false) {
+            self.props = props
+            self.smileShutter = smileShutter
+        }
+
+        public static let `default` = AIOptions()
+    }
+
     public var eventId: String
     public var displayName: String
     public var branding: BrandingMode
@@ -163,6 +179,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// Offers Boomerang/GIF modes at the attract screen — recorded from the
     /// live-view stream (see AnimatedCapture), not full-res stills.
     public var animationsEnabled: Bool
+    public var ai: AIOptions
     /// True for an event mirrored down by RemoteSync from the shared
     /// backend — lets a later sync tell "this event was deleted on the
     /// dashboard, remove it here too" apart from an attendant's own
@@ -184,6 +201,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         squareCrop: Bool = false,
         filtersEnabled: Bool = true,
         animationsEnabled: Bool = true,
+        ai: AIOptions = AIOptions(),
         isRemote: Bool = false,
         createdAt: Date = Date()
     ) {
@@ -200,6 +218,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.squareCrop = squareCrop
         self.filtersEnabled = filtersEnabled
         self.animationsEnabled = animationsEnabled
+        self.ai = ai
         self.isRemote = isRemote
         self.createdAt = createdAt
     }
@@ -217,7 +236,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, isRemote, createdAt
+        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, ai, isRemote, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -235,6 +254,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         squareCrop = try container.decodeIfPresent(Bool.self, forKey: .squareCrop) ?? false
         filtersEnabled = try container.decodeIfPresent(Bool.self, forKey: .filtersEnabled) ?? true
         animationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationsEnabled) ?? true
+        ai = try container.decodeIfPresent(AIOptions.self, forKey: .ai) ?? .default
         isRemote = try container.decodeIfPresent(Bool.self, forKey: .isRemote) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
@@ -254,6 +274,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(squareCrop, forKey: .squareCrop)
         try container.encode(filtersEnabled, forKey: .filtersEnabled)
         try container.encode(animationsEnabled, forKey: .animationsEnabled)
+        try container.encode(ai, forKey: .ai)
         try container.encode(isRemote, forKey: .isRemote)
         try container.encode(createdAt, forKey: .createdAt)
     }
