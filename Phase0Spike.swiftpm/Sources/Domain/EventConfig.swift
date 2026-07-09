@@ -63,7 +63,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// fixed number, so a 3-shot and a 4-shot strip can both be offered
     /// side by side at the same event.
     public struct StripOptions: Codable, Sendable, Equatable {
-        public enum Layout: String, Codable, Sendable, CaseIterable {
+        public enum Layout: String, Codable, Sendable, CaseIterable, Comparable {
             /// Classic photobooth strip — shots stacked top to bottom.
             case vertical
             /// Shots side by side — good for a 2-shot "duo" pair or a wide
@@ -71,6 +71,18 @@ public struct EventConfig: Codable, Sendable, Equatable {
             case horizontal
             /// Shots arranged in a roughly square grid (ceil(sqrt(n)) columns).
             case grid
+
+            var displayName: String {
+                switch self {
+                case .vertical: "Vertical"
+                case .horizontal: "Horizontal"
+                case .grid: "Grid"
+                }
+            }
+
+            public static func < (lhs: Layout, rhs: Layout) -> Bool {
+                (allCases.firstIndex(of: lhs) ?? 0) < (allCases.firstIndex(of: rhs) ?? 0)
+            }
         }
 
         public var enabled: Bool
@@ -78,24 +90,28 @@ public struct EventConfig: Codable, Sendable, Equatable {
         /// shows both a "3-Shot" and a "4-Shot" button. Always non-empty
         /// while enabled; falls back to [3] if a config somehow ends up empty.
         public var shotCounts: [Int]
-        public var layout: Layout
+        /// The layout options offered at the attract screen — e.g. all three
+        /// offers a vertical, horizontal, and grid button for every shot
+        /// count, same idea as shotCounts: guests pick, not one fixed layout.
+        /// Always non-empty while enabled; falls back to [.vertical].
+        public var layouts: [Layout]
 
-        public init(enabled: Bool = false, shotCounts: [Int] = [3], layout: Layout = .vertical) {
+        public init(enabled: Bool = false, shotCounts: [Int] = [3], layouts: [Layout] = [.vertical]) {
             self.enabled = enabled
             self.shotCounts = shotCounts
-            self.layout = layout
+            self.layouts = layouts
         }
 
         public static let `default` = StripOptions()
 
-        // Decodes leniently — existing config.json files predate both
-        // `layout` and this multi-count `shotCounts` (they have a single
-        // "shotCount" int instead), and a synthesized Decodable would throw
-        // trying to decode that shape rather than skip it, unlike
+        // Decodes leniently — existing config.json files predate `layouts`
+        // (single "layout") and this multi-count `shotCounts` (single
+        // "shotCount"), and a synthesized Decodable would throw trying to
+        // decode those older shapes rather than skip them, unlike
         // EventConfig's outer decodeIfPresent which only guards against the
         // whole "strip" key being absent.
         private enum CodingKeys: String, CodingKey {
-            case enabled, shotCount, shotCounts, layout
+            case enabled, shotCount, shotCounts, layout, layouts
         }
 
         public init(from decoder: Decoder) throws {
@@ -108,14 +124,20 @@ public struct EventConfig: Codable, Sendable, Equatable {
             } else {
                 shotCounts = [3]
             }
-            layout = try container.decodeIfPresent(Layout.self, forKey: .layout) ?? .vertical
+            if let decodedLayouts = try container.decodeIfPresent([Layout].self, forKey: .layouts), !decodedLayouts.isEmpty {
+                layouts = decodedLayouts
+            } else if let legacyLayout = try container.decodeIfPresent(Layout.self, forKey: .layout) {
+                layouts = [legacyLayout]
+            } else {
+                layouts = [.vertical]
+            }
         }
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(enabled, forKey: .enabled)
             try container.encode(shotCounts, forKey: .shotCounts)
-            try container.encode(layout, forKey: .layout)
+            try container.encode(layouts, forKey: .layouts)
         }
     }
 

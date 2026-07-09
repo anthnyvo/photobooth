@@ -35,9 +35,10 @@ public final class BoothViewModel: ObservableObject {
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
     private var returnToAttractTask: Task<Void, Never>?
-    /// Set once per guest by tapToStart(stripShotCount:) and reused by
-    /// retake() so a retake redoes the same layout the guest originally picked.
+    /// Set once per guest by tapToStart(stripShotCount:layout:) and reused
+    /// by retake() so a retake redoes the same choice the guest originally picked.
     private var sessionShotCount = 1
+    private var sessionLayout: EventConfig.StripOptions.Layout = .vertical
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
         self.config = config
@@ -159,19 +160,21 @@ public final class BoothViewModel: ObservableObject {
 
     // MARK: - Guest flow
 
-    /// `stripShotCount` is the guest's choice at the attract screen — nil
-    /// means a plain single photo; a number picks one of the event's
-    /// offered strip counts (config.strip.shotCounts, e.g. 3 or 4 both
-    /// available side by side). The event config only controls which
-    /// counts are *offered*, not which one every guest is forced into.
-    /// Doesn't start the countdown directly — moves to a "Touch to Shoot"
-    /// screen first so the guest has a moment to pose instead of the
-    /// countdown firing the instant they pick a mode.
-    public func tapToStart(stripShotCount: Int? = nil) {
+    /// `stripShotCount`/`layout` are the guest's choice at the attract
+    /// screen — nil count means a plain single photo; a number picks one of
+    /// the event's offered strip counts, and `layout` picks one of the
+    /// offered layouts (config.strip.shotCounts/layouts, e.g. 3-shot and
+    /// 4-shot, vertical and grid, all offered side by side). The event
+    /// config only controls which combinations are *offered*, not which one
+    /// every guest is forced into. Doesn't start the countdown directly —
+    /// moves to a "Touch to Shoot" screen first so the guest has a moment to
+    /// pose instead of the countdown firing the instant they pick a mode.
+    public func tapToStart(stripShotCount: Int? = nil, layout: EventConfig.StripOptions.Layout = .vertical) {
         guard step == .attract else { return }
         returnToAttractTask?.cancel()
         EventStorage.shared.recordGuestSession(eventId: config.eventId)
-        self.sessionShotCount = stripShotCount.map { max(2, $0) } ?? 1
+        sessionShotCount = stripShotCount.map { max(2, $0) } ?? 1
+        sessionLayout = layout
         step = .readyToShoot
     }
 
@@ -282,11 +285,12 @@ public final class BoothViewModel: ObservableObject {
     private func finishCapture(shots: [Data]) {
         guard let firstShot = shots.first else { return }
         let currentConfig = config
+        let currentLayout = sessionLayout
         Task {
             let branded = await Task.detached(priority: .userInitiated) {
                 var composited: Data
                 if shots.count > 1 {
-                    composited = PhotoCompositor.compositeStrip(shots, layout: currentConfig.strip.layout) ?? firstShot
+                    composited = PhotoCompositor.compositeStrip(shots, layout: currentLayout) ?? firstShot
                 } else {
                     composited = firstShot
                 }

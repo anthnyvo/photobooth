@@ -33,17 +33,18 @@ struct AttractView: View {
 
                 if model.config.strip.enabled {
                     // Strip mode is available for this event but shouldn't
-                    // force every guest into one fixed count — every count
-                    // the event offers (e.g. 3-shot and 4-shot both) gets
-                    // its own button, plus Single, so the guest picks.
+                    // force every guest into one fixed count/layout — every
+                    // combination the event offers (e.g. 3-shot and 4-shot,
+                    // vertical/horizontal/grid) gets its own button, plus
+                    // Single, so the guest picks.
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 32) {
                             DialButton(label: "Single Photo", systemImage: "camera", diameter: 92) {
                                 model.tapToStart()
                             }
-                            ForEach(model.config.strip.shotCounts.sorted(), id: \.self) { count in
-                                DialButton(label: "\(count)-Shot Strip", systemImage: "photo.stack.fill", diameter: 92) {
-                                    model.tapToStart(stripShotCount: count)
+                            ForEach(stripOptions) { option in
+                                DialButton(label: option.label, systemImage: "photo.stack.fill", diameter: 92) {
+                                    model.tapToStart(stripShotCount: option.count, layout: option.layout)
                                 }
                             }
                         }
@@ -100,5 +101,25 @@ struct AttractView: View {
             guard !model.config.strip.enabled else { return }
             model.tapToStart()
         }
+    }
+
+    /// Every offered (shot count, layout) combination — e.g. 3-shot and
+    /// 4-shot each offered in every enabled layout, not one fixed pairing.
+    private var stripOptions: [StripOption] {
+        let counts = model.config.strip.shotCounts.sorted()
+        let layouts = model.config.strip.layouts.sorted()
+        return layouts.flatMap { layout in
+            counts.map { count in
+                StripOption(count: count, layout: layout)
+            }
+        }
+    }
+
+    private struct StripOption: Identifiable {
+        let count: Int
+        let layout: EventConfig.StripOptions.Layout
+
+        var id: String { "\(count)-\(layout.rawValue)" }
+        var label: String { "\(count)-Shot \(layout.displayName)" }
     }
 }

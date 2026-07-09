@@ -34,7 +34,9 @@ struct AdminView: View {
     /// Which shot counts are offered at the attract screen — e.g. {3, 4}
     /// shows both a 3-Shot and a 4-Shot button, not one fixed count.
     @State private var stripShotCounts: Set<Int> = [3]
-    @State private var stripLayout: EventConfig.StripOptions.Layout = .vertical
+    /// Which layouts are offered at the attract screen — e.g. all three
+    /// shows vertical/horizontal/grid buttons, not one fixed layout.
+    @State private var stripLayouts: Set<EventConfig.StripOptions.Layout> = [.vertical]
     @State private var squareCrop = false
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
@@ -98,10 +100,16 @@ struct AdminView: View {
                                 }
                             ))
                         }
-                        Picker("Layout", selection: $stripLayout) {
-                            Text("Vertical").tag(EventConfig.StripOptions.Layout.vertical)
-                            Text("Horizontal").tag(EventConfig.StripOptions.Layout.horizontal)
-                            Text("Grid").tag(EventConfig.StripOptions.Layout.grid)
+                        Text("Layouts offered")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        ForEach(EventConfig.StripOptions.Layout.allCases, id: \.self) { layout in
+                            Toggle(layout.displayName, isOn: Binding(
+                                get: { stripLayouts.contains(layout) },
+                                set: { isOn in
+                                    if isOn { stripLayouts.insert(layout) } else { stripLayouts.remove(layout) }
+                                }
+                            ))
                         }
                     }
                 }
@@ -261,7 +269,7 @@ struct AdminView: View {
         overlayEnabled = current.overlay.enabled
         stripEnabled = current.strip.enabled
         stripShotCounts = Set(current.strip.shotCounts)
-        stripLayout = current.strip.layout
+        stripLayouts = Set(current.strip.layouts)
         squareCrop = current.squareCrop
     }
 
@@ -278,7 +286,7 @@ struct AdminView: View {
             strip: .init(
                 enabled: stripEnabled,
                 shotCounts: stripShotCounts.isEmpty ? [3] : stripShotCounts.sorted(),
-                layout: stripLayout
+                layouts: stripLayouts.isEmpty ? [.vertical] : stripLayouts.sorted()
             ),
             squareCrop: squareCrop
         )
