@@ -81,7 +81,7 @@ private struct ConnectView: View {
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
                     Image(systemName: "camera")
                         .font(.system(size: 40, weight: .medium))
-                        .foregroundStyle(theme.primary)
+                        .foregroundStyle(Chassis.textPrimary)
                 }
                 .frame(width: 116, height: 116)
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 5)
