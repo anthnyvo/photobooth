@@ -64,12 +64,13 @@ struct ChassisBackground: View {
 }
 
 extension View {
-    /// Dark glassy card with a hairline stroke and big modern corner radius,
-    /// slightly translucent so the gradient backdrop glows through.
+    /// Real frosted-glass card: `.ultraThinMaterial` blur (not a flat
+    /// semi-opaque color) so the gradient backdrop actually shows through
+    /// blurred, plus a hairline stroke and big modern corner radius.
     func chassisPanel(cornerRadius: CGFloat = 28) -> some View {
         background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .fill(Chassis.card.opacity(0.86))
+                .fill(.ultraThinMaterial)
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -107,7 +108,7 @@ struct PillButton: View {
                 .padding(.vertical, 16)
                 .padding(.horizontal, 44)
                 .background(
-                    Capsule().fill(prominent ? Color.white : Chassis.card.opacity(0.86))
+                    Capsule().fill(prominent ? AnyShapeStyle(Color.white) : AnyShapeStyle(.ultraThinMaterial))
                 )
                 .overlay(
                     Capsule().strokeBorder(prominent ? Color.clear : Chassis.hairline, lineWidth: 1)
@@ -133,7 +134,7 @@ struct DialButton: View {
             VStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .fill(accent ?? Chassis.card.opacity(0.86))
+                        .fill(accent.map(AnyShapeStyle.init) ?? AnyShapeStyle(.ultraThinMaterial))
                     if accent == nil {
                         Circle()
                             .strokeBorder(Chassis.hairline, lineWidth: 1)
@@ -163,7 +164,7 @@ struct BackButton: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(Chassis.textPrimary)
                 .frame(width: 44, height: 44)
-                .background(Circle().fill(Chassis.card.opacity(0.86)))
+                .background(Circle().fill(.ultraThinMaterial))
                 .overlay(Circle().strokeBorder(Chassis.hairline, lineWidth: 1))
                 .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         }
@@ -185,7 +186,7 @@ struct GhostButton: View {
                 .foregroundStyle(Chassis.textSecondary)
                 .padding(.vertical, 10)
                 .padding(.horizontal, 20)
-                .background(Capsule().fill(Chassis.card.opacity(0.6)))
+                .background(Capsule().fill(.ultraThinMaterial))
                 .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
         }
         .buttonStyle(.plain)

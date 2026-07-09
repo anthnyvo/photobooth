@@ -26,7 +26,7 @@ struct PINGate<Content: View>: View {
                 VStack(spacing: 24) {
                     ZStack {
                         Circle()
-                            .fill(Chassis.card.opacity(0.86))
+                            .fill(.ultraThinMaterial)
                         Circle()
                             .strokeBorder(Chassis.hairline, lineWidth: 1)
                         Image(systemName: "lock")

@@ -56,7 +56,7 @@ struct AdminView: View {
                         Text("Standard (default look)").tag(EventConfig.BrandingMode.standard)
                     }
                 }
-                .listRowBackground(Chassis.card.opacity(0.86))
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
                 if branding == .custom {
                     Section("Branding") {
@@ -70,13 +70,13 @@ struct AdminView: View {
                                 .frame(height: 80)
                         }
                     }
-                    .listRowBackground(Chassis.card.opacity(0.86))
+                    .listRowBackground(Rectangle().fill(.ultraThinMaterial))
                 }
 
                 Section("Capture") {
                     Stepper("Countdown: \(countdownSeconds)s", value: $countdownSeconds, in: 3...10)
                 }
-                .listRowBackground(Chassis.card.opacity(0.86))
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
                 Section("Photo Strip") {
                     Toggle("Enable photo strip", isOn: $stripEnabled)
@@ -84,7 +84,7 @@ struct AdminView: View {
                         Stepper("Shots: \(stripShotCount)", value: $stripShotCount, in: 2...4)
                     }
                 }
-                .listRowBackground(Chassis.card.opacity(0.86))
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
                 Section("Overlay / Frame") {
                     Toggle("Burn overlay into photo", isOn: $overlayEnabled)
@@ -101,21 +101,21 @@ struct AdminView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .listRowBackground(Chassis.card.opacity(0.86))
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
                 Section("Sharing") {
                     Toggle("AirDrop", isOn: $airdrop)
                     Toggle("QR Code", isOn: $qrGallery)
                     Toggle("Email", isOn: $email)
                 }
-                .listRowBackground(Chassis.card.opacity(0.86))
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
                 if qrGallery {
                     Section {
                         Text("QR sharing needs the camera joined to the venue's own Wi-Fi (not its own private network) so guest phones can reach this device.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
-                    .listRowBackground(Chassis.card.opacity(0.86))
+                    .listRowBackground(Rectangle().fill(.ultraThinMaterial))
                 }
 
                 Section("Printing") {
@@ -127,12 +127,12 @@ struct AdminView: View {
                         }
                     }
                 }
-                .listRowBackground(Chassis.card.opacity(0.86))
+                .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
                 if let saveMessage {
                     Text(saveMessage)
                         .foregroundStyle(.green)
-                        .listRowBackground(Chassis.card.opacity(0.86))
+                        .listRowBackground(Rectangle().fill(.ultraThinMaterial))
                 }
             }
             .scrollContentBackground(.hidden)
@@ -178,7 +178,7 @@ struct AdminView: View {
             LabeledContent("Guest sessions", value: "\(guests)")
             LabeledContent("Storage free", value: storageGB.map { String(format: "%.1f GB", $0) } ?? "—")
         }
-        .listRowBackground(Chassis.card.opacity(0.86))
+        .listRowBackground(Rectangle().fill(.ultraThinMaterial))
     }
 
     private var cameraConnected: Bool {

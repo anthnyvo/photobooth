@@ -144,7 +144,7 @@ struct ShareView: View {
         VStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(Chassis.card.opacity(0.86))
+                    .fill(.ultraThinMaterial)
                 Circle()
                     .strokeBorder(Chassis.hairline, lineWidth: 1)
                 Image(systemName: systemImage)

@@ -28,16 +28,20 @@ struct BoothRootView: View {
                 ShareView(model: model, theme: theme, photoURL: url)
             }
 
-            // Hidden attendant escape hatch — top-left corner, long press.
+            // Hidden attendant escape hatch — bottom-right corner, long
+            // press. Was top-left, same corner every screen's back button
+            // now lives in — an invisible hit-testable view still consumes
+            // taps even though it's Color.clear, so it was silently eating
+            // back-button taps meant for the view underneath it.
             VStack {
+                Spacer()
                 HStack {
+                    Spacer()
                     Color.clear
                         .frame(width: 60, height: 60)
                         .contentShape(Rectangle())
                         .onLongPressGesture(minimumDuration: 2) { showDiagnostics = true }
-                    Spacer()
                 }
-                Spacer()
             }
         }
         .statusBarHidden()
@@ -72,7 +76,7 @@ private struct ConnectView: View {
             VStack(spacing: 24) {
                 ZStack {
                     Circle()
-                        .fill(Chassis.card.opacity(0.86))
+                        .fill(.ultraThinMaterial)
                     Circle()
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
                     Image(systemName: "camera")

@@ -35,7 +35,7 @@ struct ReadyToShootView: View {
                 Spacer()
                 ZStack {
                     Circle()
-                        .fill(Chassis.card.opacity(0.85))
+                        .fill(.ultraThinMaterial)
                     Circle()
                         .strokeBorder(Chassis.hairline, lineWidth: 1)
                     Circle()
