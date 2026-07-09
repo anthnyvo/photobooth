@@ -38,6 +38,7 @@ struct AdminView: View {
     /// shows vertical/horizontal/grid buttons, not one fixed layout.
     @State private var stripLayouts: Set<EventConfig.StripOptions.Layout> = [.vertical]
     @State private var squareCrop = false
+    @State private var filtersEnabled = true
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
     @State private var selectedOverlay: PhotosPickerItem?
@@ -120,6 +121,7 @@ struct AdminView: View {
                     Text("Applies to single photos and strips alike, before the Polaroid frame.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    Toggle("Guest filters (Retro, B&W, …)", isOn: $filtersEnabled)
                 }
                 .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
@@ -271,6 +273,7 @@ struct AdminView: View {
         stripShotCounts = Set(current.strip.shotCounts)
         stripLayouts = Set(current.strip.layouts)
         squareCrop = current.squareCrop
+        filtersEnabled = current.filtersEnabled
     }
 
     private func save() {
@@ -288,7 +291,8 @@ struct AdminView: View {
                 shotCounts: stripShotCounts.isEmpty ? [3] : stripShotCounts.sorted(),
                 layouts: stripLayouts.isEmpty ? [.vertical] : stripLayouts.sorted()
             ),
-            squareCrop: squareCrop
+            squareCrop: squareCrop,
+            filtersEnabled: filtersEnabled
         )
         do {
             try EventStorage.shared.createEvent(config)

@@ -30,6 +30,10 @@ public final class BoothViewModel: ObservableObject {
     /// Best-effort — nil until (if) the camera ever reports one. See
     /// CanonProp.batteryLevel: encoding is unverified against real hardware.
     @Published public private(set) var cameraBatteryLevel: UInt32?
+    /// Guest's filter pick from the attract screen's chips — resets to
+    /// Original whenever the booth returns to attract, so one guest's
+    /// choice never silently carries over to the next.
+    @Published public var selectedFilter: PhotoFilter = .none
 
     private var transport: PTPIPTransport?
     private var camera: EOSCamera?
@@ -293,6 +297,7 @@ public final class BoothViewModel: ObservableObject {
         guard let firstShot = shots.first else { return }
         let currentConfig = config
         let currentLayout = sessionLayout
+        let currentFilter = selectedFilter
         Task {
             let branded = await Task.detached(priority: .userInitiated) {
                 var composited: Data
@@ -301,6 +306,10 @@ public final class BoothViewModel: ObservableObject {
                 } else {
                     composited = firstShot
                 }
+                // Filter before overlay/frame so the brand overlay and the
+                // Polaroid border stay unfiltered — only the photo content
+                // gets the look.
+                composited = currentFilter.apply(to: composited)
                 if currentConfig.squareCrop {
                     composited = PhotoCompositor.applySquareCrop(to: composited)
                 }
@@ -331,6 +340,7 @@ public final class BoothViewModel: ObservableObject {
     /// the view itself calling this on a timer.
     public func returnToAttract() {
         liveViewImage = liveViewImage // keep last frame visible during transition
+        selectedFilter = .none
         step = .attract
     }
 

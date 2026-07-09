@@ -77,6 +77,38 @@ struct AttractView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
+                if model.config.filtersEnabled {
+                    // Filter chips — guest picks a look before starting;
+                    // applied to the saved file (before overlay/frame) in
+                    // finishCapture. Resets to Original per guest.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(PhotoFilter.allCases) { filter in
+                                Button {
+                                    model.selectedFilter = filter
+                                } label: {
+                                    Text(filter.displayName)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(model.selectedFilter == filter ? Color.black : Chassis.textPrimary)
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 18)
+                                        .background(
+                                            Capsule().fill(model.selectedFilter == filter
+                                                ? AnyShapeStyle(Color.white)
+                                                : AnyShapeStyle(.ultraThinMaterial))
+                                        )
+                                        .overlay(
+                                            Capsule().strokeBorder(Chassis.hairline, lineWidth: 1)
+                                        )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                    }
+                    .padding(.top, 4)
+                }
                 Spacer()
             }
 

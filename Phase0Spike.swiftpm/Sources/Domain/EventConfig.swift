@@ -156,6 +156,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// the Polaroid frame — independent of strip layout, so it applies to
     /// either a single shot or a composited strip.
     public var squareCrop: Bool
+    /// Shows the guest-facing filter chips (Retro, B&W, ...) on the attract
+    /// screen. The filter itself is per-guest, not per-event — this only
+    /// controls whether the choice is offered at all.
+    public var filtersEnabled: Bool
     public var createdAt: Date
 
     public init(
@@ -170,6 +174,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         overlay: OverlayOptions = OverlayOptions(),
         strip: StripOptions = StripOptions(),
         squareCrop: Bool = false,
+        filtersEnabled: Bool = true,
         createdAt: Date = Date()
     ) {
         self.eventId = eventId
@@ -183,6 +188,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.overlay = overlay
         self.strip = strip
         self.squareCrop = squareCrop
+        self.filtersEnabled = filtersEnabled
         self.createdAt = createdAt
     }
 
@@ -199,7 +205,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, squareCrop, createdAt
+        case share, print, overlay, strip, squareCrop, filtersEnabled, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -215,6 +221,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         overlay = try container.decodeIfPresent(OverlayOptions.self, forKey: .overlay) ?? .default
         strip = try container.decodeIfPresent(StripOptions.self, forKey: .strip) ?? .default
         squareCrop = try container.decodeIfPresent(Bool.self, forKey: .squareCrop) ?? false
+        filtersEnabled = try container.decodeIfPresent(Bool.self, forKey: .filtersEnabled) ?? true
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -231,6 +238,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(overlay, forKey: .overlay)
         try container.encode(strip, forKey: .strip)
         try container.encode(squareCrop, forKey: .squareCrop)
+        try container.encode(filtersEnabled, forKey: .filtersEnabled)
         try container.encode(createdAt, forKey: .createdAt)
     }
 }
