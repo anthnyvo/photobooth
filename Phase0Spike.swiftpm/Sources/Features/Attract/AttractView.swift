@@ -30,11 +30,6 @@ struct AttractView: View {
                             .frame(maxHeight: 140)
                     }
                 }
-                Text(model.config.displayName)
-                    .font(.system(size: 40, weight: .bold))
-                    .foregroundStyle(Chassis.textPrimary)
-                    .shadow(color: .black.opacity(0.6), radius: 8)
-                Spacer()
 
                 if model.config.strip.enabled {
                     // Strip mode is available for this event but shouldn't
@@ -48,7 +43,6 @@ struct AttractView: View {
                             model.tapToStart(wantsStrip: true)
                         }
                     }
-                    .padding(.bottom, 56)
                 } else {
                     // Shutter-ring start control: outer hairline ring, accent
                     // inner disc — reads as a camera control, not a web button.
@@ -75,8 +69,8 @@ struct AttractView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .padding(.bottom, 56)
                 }
+                Spacer()
             }
 
             if let error = model.lastError {
