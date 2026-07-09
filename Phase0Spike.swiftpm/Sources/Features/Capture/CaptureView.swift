@@ -33,6 +33,24 @@ struct CaptureView: View {
                 Color.white.ignoresSafeArea()
                     .opacity(0.9)
                     .transition(.opacity)
+            case .recording:
+                // Boomerang/GIF recording — live view stays fully visible
+                // (no flash) so guests can see themselves move; just a
+                // pulsing REC badge.
+                VStack {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(.red)
+                            .frame(width: 12, height: 12)
+                        ChassisLabel(text: "Recording", size: 13)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 20)
+                    .chassisPanel(cornerRadius: 20)
+                    .padding(.top, 24)
+                    Spacer()
+                }
+                .transition(.opacity)
             default:
                 EmptyView()
             }

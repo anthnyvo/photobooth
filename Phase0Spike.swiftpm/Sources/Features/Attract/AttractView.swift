@@ -7,8 +7,14 @@ struct AttractView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
     /// Pick-then-confirm: tapping a mode highlights it; only the Start pill
-    /// actually begins the session. nil count = Single Photo (the default).
-    @State private var selectedOption: StripOption?
+    /// actually begins the session. Defaults to Single Photo.
+    @State private var selectedMode: Mode = .single
+
+    /// Whether the event offers any choice beyond a plain single photo —
+    /// drives the pick-then-confirm UI vs. the direct shutter button.
+    private var hasModeChoices: Bool {
+        model.config.strip.enabled || model.config.animationsEnabled
+    }
 
     var body: some View {
         ZStack {
@@ -34,22 +40,29 @@ struct AttractView: View {
                     }
                 }
 
-                if model.config.strip.enabled {
-                    // Strip mode is available for this event but shouldn't
-                    // force every guest into one fixed count/layout — every
-                    // combination the event offers (e.g. 3-shot and 4-shot,
-                    // vertical/horizontal/grid) gets its own button, plus
-                    // Single. Tapping highlights the pick; the Start pill
-                    // below confirms it, so guests can browse without the
-                    // countdown flow firing on the first touch.
+                if hasModeChoices {
+                    // Every mode the event offers gets its own button —
+                    // Single, each (count, layout) strip combination, and
+                    // Boomerang/GIF. Tapping highlights the pick; the Start
+                    // pill below confirms it, so guests can browse without
+                    // the countdown flow firing on the first touch.
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 32) {
-                            DialButton(label: "Single Photo", systemImage: "camera", isSelected: selectedOption == nil, diameter: 92) {
-                                selectedOption = nil
+                            DialButton(label: "Single Photo", systemImage: "camera", isSelected: selectedMode == .single, diameter: 92) {
+                                selectedMode = .single
                             }
-                            ForEach(stripOptions) { option in
-                                DialButton(label: option.label, systemImage: "photo.stack.fill", isSelected: selectedOption == option, diameter: 92) {
-                                    selectedOption = option
+                            if model.config.strip.enabled {
+                                ForEach(stripOptions) { option in
+                                    DialButton(label: option.label, systemImage: "photo.stack.fill", isSelected: selectedMode == .strip(option), diameter: 92) {
+                                        selectedMode = .strip(option)
+                                    }
+                                }
+                            }
+                            if model.config.animationsEnabled {
+                                ForEach(AnimatedStyle.allCases) { style in
+                                    DialButton(label: style.displayName, systemImage: style.systemImage, isSelected: selectedMode == .animated(style), diameter: 92) {
+                                        selectedMode = .animated(style)
+                                    }
                                 }
                             }
                         }
@@ -86,7 +99,8 @@ struct AttractView: View {
                 if model.config.filtersEnabled {
                     // Filter chips — guest picks a look before starting;
                     // applied to the saved file (before overlay/frame) in
-                    // finishCapture. Resets to Original per guest.
+                    // finishCapture, or per frame for Boomerang/GIF.
+                    // Resets to Original per guest.
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(PhotoFilter.allCases) { filter in
@@ -115,16 +129,19 @@ struct AttractView: View {
                     .padding(.top, 4)
                 }
 
-                if model.config.strip.enabled {
+                if hasModeChoices {
                     // The confirm step — mode/filter taps above only mark a
                     // choice, this actually starts the session.
                     PillButton(title: "Start") {
-                        if let option = selectedOption {
-                            model.tapToStart(stripShotCount: option.count, layout: option.layout)
-                        } else {
+                        switch selectedMode {
+                        case .single:
                             model.tapToStart()
+                        case .strip(let option):
+                            model.tapToStart(stripShotCount: option.count, layout: option.layout)
+                        case .animated(let style):
+                            model.tapToStartAnimated(style)
                         }
-                        selectedOption = nil
+                        selectedMode = .single
                     }
                     .padding(.top, 8)
                 }
@@ -147,9 +164,9 @@ struct AttractView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             // Tap-anywhere is a shortcut for the single shutter button; once
-            // strip mode is offered, starting requires an explicit Single/
-            // Strip choice instead, so this no-ops there.
-            guard !model.config.strip.enabled else { return }
+            // any mode choice is offered, starting requires the explicit
+            // pick-then-Start flow instead, so this no-ops there.
+            guard !hasModeChoices else { return }
             model.tapToStart()
         }
     }
@@ -164,6 +181,12 @@ struct AttractView: View {
                 StripOption(count: count, layout: layout)
             }
         }
+    }
+
+    private enum Mode: Equatable {
+        case single
+        case strip(StripOption)
+        case animated(AnimatedStyle)
     }
 
     private struct StripOption: Identifiable, Equatable {

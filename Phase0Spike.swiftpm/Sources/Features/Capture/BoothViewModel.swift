@@ -12,6 +12,9 @@ public enum BoothStep: Equatable {
     case readyToShoot
     case countdown(Int)
     case capturing
+    /// Boomerang/GIF frame recording — live view stays visible (unlike the
+    /// white .capturing flash) so guests can see themselves move.
+    case recording
     case review(URL)
     case sharing(URL)
 }
@@ -40,10 +43,17 @@ public final class BoothViewModel: ObservableObject {
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
     private var returnToAttractTask: Task<Void, Never>?
-    /// Set once per guest by tapToStart(stripShotCount:layout:) and reused
-    /// by retake() so a retake redoes the same choice the guest originally picked.
+    /// Set once per guest by tapToStart and reused by retake() so a retake
+    /// redoes the same choice the guest originally picked.
     private var sessionShotCount = 1
     private var sessionLayout: EventConfig.StripOptions.Layout = .vertical
+    /// Non-nil = this session records a Boomerang/GIF from live view
+    /// instead of firing the shutter.
+    private var sessionAnimatedStyle: AnimatedStyle?
+    /// Live-view JPEGs collected while `isRecordingFrames` — appended by
+    /// the live-view consumer task, drained by the animated capture path.
+    private var recordedFrames: [Data] = []
+    private var isRecordingFrames = false
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
         self.config = config
@@ -159,7 +169,12 @@ public final class BoothViewModel: ObservableObject {
                 for await jpeg in frames {
                     guard let self else { return }
                     if let image = UIImage(data: jpeg) {
-                        await MainActor.run { self.liveViewImage = image }
+                        await MainActor.run {
+                            self.liveViewImage = image
+                            if self.isRecordingFrames {
+                                self.recordedFrames.append(jpeg)
+                            }
+                        }
                     }
                 }
             }
@@ -186,6 +201,17 @@ public final class BoothViewModel: ObservableObject {
         EventStorage.shared.recordGuestSession(eventId: config.eventId)
         sessionShotCount = stripShotCount.map { max(2, $0) } ?? 1
         sessionLayout = layout
+        sessionAnimatedStyle = nil
+        step = .readyToShoot
+    }
+
+    /// Boomerang/GIF variant of tapToStart — records live-view frames
+    /// instead of firing the shutter (see AnimatedCapture for why).
+    public func tapToStartAnimated(_ style: AnimatedStyle) {
+        guard step == .attract else { return }
+        returnToAttractTask?.cancel()
+        EventStorage.shared.recordGuestSession(eventId: config.eventId)
+        sessionAnimatedStyle = style
         step = .readyToShoot
     }
 
@@ -214,6 +240,10 @@ public final class BoothViewModel: ObservableObject {
     }
 
     private func captureSequence() async {
+        if let style = sessionAnimatedStyle {
+            await recordAnimatedCapture(style: style)
+            return
+        }
         let totalShots = sessionShotCount
         var shots: [Data] = []
         for shotIndex in 1...totalShots {
@@ -231,6 +261,52 @@ public final class BoothViewModel: ObservableObject {
         }
         stripProgress = nil
         finishCapture(shots: shots)
+    }
+
+    /// Boomerang/GIF path: countdown, then ~2.5s of live-view frames into
+    /// the buffer, encoded off-main into a looping GIF (filter applied per
+    /// frame; overlay/Polaroid skipped — static-print concepts). Saved as
+    /// .gif so Review/Share can tell it apart from stills by extension.
+    private func recordAnimatedCapture(style: AnimatedStyle) async {
+        let total = max(1, config.countdownSeconds)
+        for remaining in stride(from: total, through: 1, by: -1) {
+            step = .countdown(remaining)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+
+        recordedFrames = []
+        isRecordingFrames = true
+        step = .recording
+        try? await Task.sleep(nanoseconds: 2_500_000_000)
+        isRecordingFrames = false
+        let frames = recordedFrames
+        recordedFrames = []
+
+        guard !frames.isEmpty else {
+            // Live view stalled the whole window (dead connection most
+            // likely) — same guest-facing outcome as a failed capture.
+            lastError = "Couldn't record — try again"
+            step = .attract
+            return
+        }
+
+        let currentFilter = selectedFilter
+        let gifData = await Task.detached(priority: .userInitiated) {
+            AnimatedCapture.encodeGIF(frames: frames, style: style, filter: currentFilter)
+        }.value
+
+        guard let gifData else {
+            lastError = "Couldn't create the \(style.displayName) — try again"
+            step = .attract
+            return
+        }
+        do {
+            let url = try EventStorage.shared.savePhoto(gifData, eventId: config.eventId, fileExtension: "gif")
+            step = .review(url)
+        } catch {
+            lastError = "Save failed: \(error)"
+            step = .attract
+        }
     }
 
     /// One countdown + one capture, returning the raw JPEG bytes. Extracted

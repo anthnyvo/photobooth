@@ -44,7 +44,16 @@ struct ShareView: View {
                         // Image itself with an explicit JPEG-backed preview
                         // is what makes both AirDrop and other apps treat it
                         // as real image data instead of a generic file link.
-                        if let uiImage {
+                        // GIFs are the exception: re-wrapping as Image would
+                        // flatten the animation to one frame, so those share
+                        // as the file URL (extension makes targets treat it
+                        // as an animated GIF).
+                        if isGIF {
+                            ShareLink(item: photoURL, preview: SharePreview("GIF", image: uiImage.map(Image.init) ?? Image(systemName: "film"))) {
+                                dialFace(label: "AirDrop", systemImage: "square.and.arrow.up")
+                            }
+                            .buttonStyle(.plain)
+                        } else if let uiImage {
                             ShareLink(item: Image(uiImage: uiImage), preview: SharePreview("Photo", image: Image(uiImage: uiImage))) {
                                 dialFace(label: "AirDrop", systemImage: "square.and.arrow.up")
                             }
@@ -61,7 +70,8 @@ struct ShareView: View {
                             showingMail = true
                         }
                     }
-                    if model.config.print.enabled {
+                    // Print is stills-only — an animated GIF can't print.
+                    if model.config.print.enabled && !isGIF {
                         DialButton(label: "Print", systemImage: "printer") {
                             printsThisSession += 1
                             printJob.print(photoURL: photoURL)
@@ -100,6 +110,10 @@ struct ShareView: View {
                 EventStorage.shared.recordPrint(eventId: model.config.eventId)
             }
         }
+    }
+
+    private var isGIF: Bool {
+        photoURL.pathExtension.lowercased() == "gif"
     }
 
     private var printLimitReached: Bool {

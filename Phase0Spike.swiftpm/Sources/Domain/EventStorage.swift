@@ -132,8 +132,8 @@ public final class EventStorage {
     /// Saves a captured photo under the event's photos/ folder, named by
     /// timestamp so ordering is free and collisions are practically impossible.
     @discardableResult
-    public func savePhoto(_ data: Data, eventId: String) throws -> URL {
-        let name = "IMG_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+    public func savePhoto(_ data: Data, eventId: String, fileExtension: String = "jpg") throws -> URL {
+        let name = "IMG_\(Int(Date().timeIntervalSince1970 * 1000)).\(fileExtension)"
         let dest = photosDirectory(eventId).appendingPathComponent(name)
         try data.write(to: dest, options: .atomic)
         return dest

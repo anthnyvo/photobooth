@@ -15,6 +15,18 @@ struct ReviewView: View {
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .overlay(alignment: .topTrailing) {
+                            // GIFs preview as their first frame here (SwiftUI
+                            // Image doesn't animate) — badge makes clear the
+                            // real file moves.
+                            if photoURL.pathExtension.lowercased() == "gif" {
+                                ChassisLabel(text: "GIF", size: 11)
+                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 12)
+                                    .chassisPanel(cornerRadius: 14)
+                                    .padding(10)
+                            }
+                        }
                         .padding(10)
                         .chassisPanel()
                         .padding(.horizontal, 24)

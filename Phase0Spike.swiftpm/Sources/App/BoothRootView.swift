@@ -22,7 +22,7 @@ struct BoothRootView: View {
                 AttractView(model: model, theme: theme)
             case .readyToShoot:
                 ReadyToShootView(model: model, theme: theme)
-            case .countdown, .capturing:
+            case .countdown, .capturing, .recording:
                 CaptureView(model: model, theme: theme)
             case .review(let url):
                 ReviewView(model: model, theme: theme, photoURL: url)

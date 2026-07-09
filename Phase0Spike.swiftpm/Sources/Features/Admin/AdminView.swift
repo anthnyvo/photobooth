@@ -39,6 +39,7 @@ struct AdminView: View {
     @State private var stripLayouts: Set<EventConfig.StripOptions.Layout> = [.vertical]
     @State private var squareCrop = false
     @State private var filtersEnabled = true
+    @State private var animationsEnabled = true
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
     @State private var selectedOverlay: PhotosPickerItem?
@@ -122,6 +123,7 @@ struct AdminView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     Toggle("Guest filters (Retro, B&W, …)", isOn: $filtersEnabled)
+                    Toggle("Boomerang & GIF", isOn: $animationsEnabled)
                 }
                 .listRowBackground(Rectangle().fill(.ultraThinMaterial))
 
@@ -274,6 +276,7 @@ struct AdminView: View {
         stripLayouts = Set(current.strip.layouts)
         squareCrop = current.squareCrop
         filtersEnabled = current.filtersEnabled
+        animationsEnabled = current.animationsEnabled
     }
 
     private func save() {
@@ -292,7 +295,8 @@ struct AdminView: View {
                 layouts: stripLayouts.isEmpty ? [.vertical] : stripLayouts.sorted()
             ),
             squareCrop: squareCrop,
-            filtersEnabled: filtersEnabled
+            filtersEnabled: filtersEnabled,
+            animationsEnabled: animationsEnabled
         )
         do {
             try EventStorage.shared.createEvent(config)

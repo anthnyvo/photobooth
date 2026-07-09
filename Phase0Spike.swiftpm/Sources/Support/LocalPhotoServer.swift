@@ -62,7 +62,8 @@ public actor LocalPhotoServer {
                 await respond(connection, status: "404 Not Found", body: Data("Not found".utf8))
                 return
             }
-            await respond(connection, status: "200 OK", body: data, contentType: "image/jpeg")
+            let contentType = fileURL.pathExtension.lowercased() == "gif" ? "image/gif" : "image/jpeg"
+            await respond(connection, status: "200 OK", body: data, contentType: contentType)
         } catch {
             connection.cancel()
         }

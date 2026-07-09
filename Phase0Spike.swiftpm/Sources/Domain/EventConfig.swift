@@ -160,6 +160,9 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// screen. The filter itself is per-guest, not per-event — this only
     /// controls whether the choice is offered at all.
     public var filtersEnabled: Bool
+    /// Offers Boomerang/GIF modes at the attract screen — recorded from the
+    /// live-view stream (see AnimatedCapture), not full-res stills.
+    public var animationsEnabled: Bool
     public var createdAt: Date
 
     public init(
@@ -175,6 +178,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         strip: StripOptions = StripOptions(),
         squareCrop: Bool = false,
         filtersEnabled: Bool = true,
+        animationsEnabled: Bool = true,
         createdAt: Date = Date()
     ) {
         self.eventId = eventId
@@ -189,6 +193,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.strip = strip
         self.squareCrop = squareCrop
         self.filtersEnabled = filtersEnabled
+        self.animationsEnabled = animationsEnabled
         self.createdAt = createdAt
     }
 
@@ -205,7 +210,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, squareCrop, filtersEnabled, createdAt
+        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -222,6 +227,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         strip = try container.decodeIfPresent(StripOptions.self, forKey: .strip) ?? .default
         squareCrop = try container.decodeIfPresent(Bool.self, forKey: .squareCrop) ?? false
         filtersEnabled = try container.decodeIfPresent(Bool.self, forKey: .filtersEnabled) ?? true
+        animationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationsEnabled) ?? true
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -239,6 +245,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(strip, forKey: .strip)
         try container.encode(squareCrop, forKey: .squareCrop)
         try container.encode(filtersEnabled, forKey: .filtersEnabled)
+        try container.encode(animationsEnabled, forKey: .animationsEnabled)
         try container.encode(createdAt, forKey: .createdAt)
     }
 }

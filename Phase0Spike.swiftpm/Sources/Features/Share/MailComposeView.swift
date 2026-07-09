@@ -15,7 +15,8 @@ struct MailComposeView: UIViewControllerRepresentable {
         controller.mailComposeDelegate = context.coordinator
         controller.setSubject("Your photo")
         if let data = try? Data(contentsOf: photoURL) {
-            controller.addAttachmentData(data, mimeType: "image/jpeg", fileName: photoURL.lastPathComponent)
+            let mimeType = photoURL.pathExtension.lowercased() == "gif" ? "image/gif" : "image/jpeg"
+            controller.addAttachmentData(data, mimeType: mimeType, fileName: photoURL.lastPathComponent)
         }
         return controller
     }
