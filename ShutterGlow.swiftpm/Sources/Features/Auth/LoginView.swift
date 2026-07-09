@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// Same account as the web dashboard signs into — an operator's login
-/// pairs the iPad with whatever events they're assigned. "Continue offline"
-/// skips this entirely: a booth that's already been paired (or is
-/// admin-configured purely on-device via the PIN-gated Event Setup) never
-/// needs connectivity to run.
+/// pairs the iPad with whatever events they're assigned. Required on every
+/// device: no offline bypass, every attendant needs a real account. Once
+/// signed in and synced, the booth still runs with zero connectivity for
+/// the rest of an event — this gate is only about who gets in, not about
+/// requiring a live connection during a shoot.
 struct LoginView: View {
     @ObservedObject var model: BoothViewModel
     @State private var email = ""
@@ -72,10 +73,6 @@ struct LoginView: View {
                 }
 
                 PillButton(title: isSubmitting ? "Signing in…" : "Sign in", action: submit)
-
-                GhostButton(title: "Continue offline") {
-                    model.continueOffline()
-                }
 
                 Spacer()
             }

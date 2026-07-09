@@ -84,14 +84,6 @@ public final class BoothViewModel: ObservableObject {
         }
     }
 
-    /// Skips sign-in entirely — the booth still runs off whatever events are
-    /// already cached locally (created on-device via Event Setup, or synced
-    /// on a previous login). Connectivity is never required to run an event
-    /// that's already been paired.
-    public func continueOffline() {
-        step = .home
-    }
-
     public func signOut() {
         SupabaseAuth.shared.signOut()
         step = .login
