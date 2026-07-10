@@ -16,6 +16,7 @@ struct CaptureView: View {
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
+                    .liveFilterEffect(model.selectedFilter)
                 if let propOverlay = model.livePropOverlay {
                     Image(uiImage: propOverlay)
                         .resizable()

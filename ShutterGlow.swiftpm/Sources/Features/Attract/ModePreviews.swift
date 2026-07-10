@@ -33,7 +33,7 @@ struct ModePreviewCard: View {
                 ChassisLabel(text: title, size: 10)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 }
 
@@ -140,9 +140,11 @@ struct FilterPreview: View {
         VStack(spacing: 0) {
             PhotoSwatch()
                 .aspectRatio(4 / 3, contentMode: .fit)
-                .saturation(saturation)
-                .contrast(contrast)
-                .overlay(tint)
+                // same values the live view preview uses (LiveFilterEffect),
+                // so the card and the full-screen look always agree
+                .saturation(filter.previewSaturation)
+                .contrast(filter.previewContrast)
+                .overlay(filter.previewTint)
                 .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
             Spacer(minLength: 0)
         }
@@ -151,38 +153,6 @@ struct FilterPreview: View {
         .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.white))
         .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
         .rotationEffect(.degrees(-3))
-    }
-
-    private var saturation: Double {
-        switch filter {
-        case .blackAndWhite: 0
-        case .sepia: 0.25
-        case .vivid: 1.7
-        case .faded: 0.6
-        default: 1
-        }
-    }
-
-    private var contrast: Double {
-        switch filter {
-        case .vivid: 1.15
-        case .faded: 0.85
-        default: 1
-        }
-    }
-
-    @ViewBuilder
-    private var tint: some View {
-        switch filter {
-        case .retro:
-            Color(red: 0.95, green: 0.62, blue: 0.30).opacity(0.28)
-        case .sepia:
-            Color(red: 0.62, green: 0.44, blue: 0.22).opacity(0.4)
-        case .faded:
-            Color.white.opacity(0.22)
-        default:
-            Color.clear
-        }
     }
 }
 

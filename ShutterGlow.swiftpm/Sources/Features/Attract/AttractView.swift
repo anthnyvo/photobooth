@@ -29,6 +29,7 @@ struct AttractView: View {
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
+                    .liveFilterEffect(model.selectedFilter)
                     .overlay(Chassis.base.opacity(0.55).ignoresSafeArea())
                 // AR-style prop preview — same pixel aspect as the frame,
                 // so the identical scaledToFill transform keeps the two
@@ -158,6 +159,11 @@ struct AttractView: View {
             model.tapToStart()
         }
         .task { await model.runLivePropOverlayLoop() }
+        // Light haptic tick on every pick — selection should feel physical.
+        .sensoryFeedback(.selection, trigger: selectedMode)
+        .sensoryFeedback(.selection, trigger: selectedCategory)
+        .sensoryFeedback(.selection, trigger: model.selectedFilter)
+        .sensoryFeedback(.selection, trigger: model.selectedProp)
     }
 
     // MARK: - Category content

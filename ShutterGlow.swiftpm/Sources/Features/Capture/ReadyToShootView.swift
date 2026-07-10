@@ -21,6 +21,7 @@ struct ReadyToShootView: View {
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
+                    .liveFilterEffect(model.selectedFilter)
                     .overlay(Chassis.base.opacity(0.35).ignoresSafeArea())
                 if let propOverlay = model.livePropOverlay {
                     Image(uiImage: propOverlay)

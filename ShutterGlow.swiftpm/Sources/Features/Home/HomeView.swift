@@ -29,10 +29,10 @@ struct HomeView: View {
                 .shadow(color: .black.opacity(0.4), radius: 16, y: 6)
 
                 VStack(spacing: 10) {
-                    Text("Photobooth")
+                    Text("ShutterGlow")
                         .font(.system(size: 34, weight: .bold))
                         .foregroundStyle(Chassis.textPrimary)
-                    Text("Tethered to your camera. No cloud, no backend.")
+                    Text("Pro camera photobooth. Runs even with zero signal.")
                         .font(.callout)
                         .foregroundStyle(Chassis.textSecondary)
                         .multilineTextAlignment(.center)

@@ -93,6 +93,18 @@ struct ChassisLabel: View {
     }
 }
 
+/// Press-responsive button style — quick scale-down + slight dim on touch,
+/// the tactile micro-interaction that separates modern iOS controls from
+/// static tap targets. Used by every custom button in the app.
+struct PressableStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
 /// Modern iOS capsule button. `prominent` = solid white pill with black
 /// text (the primary CTA look); otherwise a dark glassy pill.
 struct PillButton: View {
@@ -115,7 +127,7 @@ struct PillButton: View {
                 )
                 .shadow(color: .black.opacity(0.35), radius: 12, y: 5)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 }
 
@@ -157,7 +169,7 @@ struct DialButton: View {
                 ChassisLabel(text: label, size: 11)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 }
 
@@ -176,7 +188,7 @@ struct BackButton: View {
                 .overlay(Circle().strokeBorder(Chassis.hairline, lineWidth: 1))
                 .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 }
 
@@ -197,7 +209,7 @@ struct GhostButton: View {
                 .background(Capsule().fill(.ultraThinMaterial))
                 .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 }
 

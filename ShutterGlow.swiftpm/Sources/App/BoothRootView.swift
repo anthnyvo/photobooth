@@ -11,26 +11,33 @@ struct BoothRootView: View {
         ZStack {
             let theme = Theme(model.config)
 
-            switch model.step {
-            case .login:
-                LoginView(model: model)
-            case .home:
-                HomeView(model: model)
-            case .eventPicker:
-                EventPickerView(model: model)
-            case .connecting:
-                ConnectView(model: model, theme: theme)
-            case .attract:
-                AttractView(model: model, theme: theme)
-            case .readyToShoot:
-                ReadyToShootView(model: model, theme: theme)
-            case .countdown, .capturing, .recording:
-                CaptureView(model: model, theme: theme)
-            case .review(let url):
-                ReviewView(model: model, theme: theme, photoURL: url)
-            case .sharing(let url):
-                ShareView(model: model, theme: theme, photoURL: url)
+            // Soft crossfade + slight scale between steps — hard cuts read
+            // as old; screens should flow into each other. Grouped so one
+            // transition covers every step view.
+            Group {
+                switch model.step {
+                case .login:
+                    LoginView(model: model)
+                case .home:
+                    HomeView(model: model)
+                case .eventPicker:
+                    EventPickerView(model: model)
+                case .connecting:
+                    ConnectView(model: model, theme: theme)
+                case .attract:
+                    AttractView(model: model, theme: theme)
+                case .readyToShoot:
+                    ReadyToShootView(model: model, theme: theme)
+                case .countdown, .capturing, .recording:
+                    CaptureView(model: model, theme: theme)
+                case .review(let url):
+                    ReviewView(model: model, theme: theme, photoURL: url)
+                case .sharing(let url):
+                    ShareView(model: model, theme: theme, photoURL: url)
+                }
             }
+            .transition(.opacity.combined(with: .scale(scale: 0.985)))
+            .animation(.snappy(duration: 0.3), value: model.step)
 
             // Hidden attendant escape hatch — bottom-right corner, long
             // press. Was top-left, same corner every screen's back button
