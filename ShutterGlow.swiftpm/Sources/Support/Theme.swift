@@ -34,29 +34,32 @@ public enum Chassis {
     public static let textSecondary = Color.white.opacity(0.55)
 }
 
-/// The signature backdrop: dusty purple gradient with a warm orange glow
-/// up top and a cooler violet bloom below — matches the soft, blurred
-/// gradient look, with dark cards floating on top.
+/// The signature backdrop: near-black base (matching the marketing site)
+/// with a faint dusty-purple wash and dim warm/cool glow blooms — dark
+/// enough that glass cards and white type carry the contrast, the blooms
+/// just keep it from reading as flat black.
 struct ChassisBackground: View {
     var body: some View {
         ZStack {
+            Chassis.base
             LinearGradient(
                 colors: [
-                    Color(red: 0.64, green: 0.58, blue: 0.71),
-                    Color(red: 0.47, green: 0.42, blue: 0.55),
-                    Color(red: 0.36, green: 0.32, blue: 0.44)
+                    Color(red: 0.16, green: 0.13, blue: 0.20),
+                    Color(red: 0.09, green: 0.08, blue: 0.12),
+                    Chassis.base
                 ],
                 startPoint: .topLeading, endPoint: .bottomTrailing
             )
+            .opacity(0.9)
             Circle()
-                .fill(Color(red: 0.87, green: 0.55, blue: 0.30).opacity(0.55))
+                .fill(Color(red: 0.87, green: 0.55, blue: 0.30).opacity(0.22))
                 .frame(width: 420, height: 420)
-                .blur(radius: 90)
+                .blur(radius: 100)
                 .offset(x: -150, y: -280)
             Circle()
-                .fill(Color(red: 0.52, green: 0.42, blue: 0.72).opacity(0.5))
+                .fill(Color(red: 0.52, green: 0.42, blue: 0.72).opacity(0.22))
                 .frame(width: 380, height: 380)
-                .blur(radius: 100)
+                .blur(radius: 110)
                 .offset(x: 170, y: 320)
         }
         .ignoresSafeArea()
