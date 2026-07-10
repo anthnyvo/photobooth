@@ -90,6 +90,10 @@ public enum RemoteSync {
             local.filtersEnabled = config.liveViewSettings.filtersEnabled
             local.animationsEnabled = config.liveViewSettings.animationsEnabled
             local.squareCrop = config.liveViewSettings.squareCrop
+            local.ai = EventConfig.AIOptions(
+                props: config.liveViewSettings.aiProps ?? false,
+                smileShutter: config.liveViewSettings.smileShutter ?? false
+            )
 
             switch config.printLayout {
             case "strip_3":
@@ -143,12 +147,18 @@ public enum RemoteSync {
             let filtersEnabled: Bool
             let animationsEnabled: Bool
             let squareCrop: Bool
+            /// Optional — rows saved before the dashboard grew AI toggles
+            /// simply lack these keys in the jsonb.
+            let aiProps: Bool?
+            let smileShutter: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
                 case filtersEnabled = "filters_enabled"
                 case animationsEnabled = "animations_enabled"
                 case squareCrop = "square_crop"
+                case aiProps = "ai_props"
+                case smileShutter = "smile_shutter"
             }
         }
     }
