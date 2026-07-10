@@ -95,15 +95,29 @@ public enum RemoteSync {
                 smileShutter: config.liveViewSettings.smileShutter ?? false
             )
 
-            switch config.printLayout {
-            case "strip_3":
-                local.strip = EventConfig.StripOptions(enabled: true, shotCounts: [3], layouts: [.vertical])
-            case "strip_4":
-                local.strip = EventConfig.StripOptions(enabled: true, shotCounts: [4], layouts: [.vertical])
-            case "grid_4":
-                local.strip = EventConfig.StripOptions(enabled: true, shotCounts: [4], layouts: [.grid])
-            default:
-                local.strip = EventConfig.StripOptions(enabled: false)
+            // Newer dashboard rows carry the full offered sets in the
+            // jsonb; rows saved before that only have the single
+            // print_layout column, mapped to a one-option set.
+            if let stripEnabled = config.liveViewSettings.stripEnabled {
+                let counts = (config.liveViewSettings.stripShotCounts ?? [3]).filter { (2...6).contains($0) }
+                let layouts = (config.liveViewSettings.stripLayouts ?? ["vertical"])
+                    .compactMap(EventConfig.StripOptions.Layout.init(rawValue:))
+                local.strip = EventConfig.StripOptions(
+                    enabled: stripEnabled,
+                    shotCounts: counts.isEmpty ? [3] : counts.sorted(),
+                    layouts: layouts.isEmpty ? [.vertical] : layouts
+                )
+            } else {
+                switch config.printLayout {
+                case "strip_3":
+                    local.strip = EventConfig.StripOptions(enabled: true, shotCounts: [3], layouts: [.vertical])
+                case "strip_4":
+                    local.strip = EventConfig.StripOptions(enabled: true, shotCounts: [4], layouts: [.vertical])
+                case "grid_4":
+                    local.strip = EventConfig.StripOptions(enabled: true, shotCounts: [4], layouts: [.grid])
+                default:
+                    local.strip = EventConfig.StripOptions(enabled: false)
+                }
             }
 
             if let overlayURLString = config.overlayTemplateURL,
@@ -151,6 +165,12 @@ public enum RemoteSync {
             /// simply lack these keys in the jsonb.
             let aiProps: Bool?
             let smileShutter: Bool?
+            /// Offered strip sets (multi-select on the dashboard). Optional
+            /// for the same pre-existing-rows reason; absent falls back to
+            /// the legacy print_layout column.
+            let stripEnabled: Bool?
+            let stripShotCounts: [Int]?
+            let stripLayouts: [String]?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
@@ -159,6 +179,9 @@ public enum RemoteSync {
                 case squareCrop = "square_crop"
                 case aiProps = "ai_props"
                 case smileShutter = "smile_shutter"
+                case stripEnabled = "strip_enabled"
+                case stripShotCounts = "strip_shot_counts"
+                case stripLayouts = "strip_layouts"
             }
         }
     }
