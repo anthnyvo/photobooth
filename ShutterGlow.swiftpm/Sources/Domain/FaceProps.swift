@@ -148,6 +148,32 @@ enum FacePropRenderer {
         return rendered.jpegData(compressionQuality: 0.92) ?? photoData
     }
 
+    /// Props-only render on a transparent canvas, sized to the frame's
+    /// pixels — the live-view AR preview. Displayed as a second
+    /// `.scaledToFill()` layer over the live feed: same pixel aspect as the
+    /// frame it was scanned from, so SwiftUI applies the identical
+    /// fill/crop transform and the two layers line up without any manual
+    /// coordinate mapping. Fast detector: this runs a few times a second.
+    static func overlayImage(_ prop: PhotoProp, matching frameData: Data) -> UIImage? {
+        guard prop != .none,
+              let image = UIImage(data: frameData),
+              let cgImage = image.cgImage else { return nil }
+
+        let faces = FaceVision.detectFaces(in: cgImage, accuracy: .live)
+        guard !faces.isEmpty else { return nil }
+
+        let pixelSize = CGSize(width: cgImage.width, height: cgImage.height)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: pixelSize, format: format).image { context in
+            let cg = context.cgContext
+            for face in faces {
+                draw(prop, on: face, in: cg)
+            }
+        }
+    }
+
     private static func draw(_ prop: PhotoProp, on face: DetectedFace, in cg: CGContext) {
         switch prop {
         case .none: break

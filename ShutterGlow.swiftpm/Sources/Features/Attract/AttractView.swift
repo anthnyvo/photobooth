@@ -26,6 +26,16 @@ struct AttractView: View {
                     .scaledToFill()
                     .ignoresSafeArea()
                     .overlay(Chassis.base.opacity(0.55).ignoresSafeArea())
+                // AR-style prop preview — same pixel aspect as the frame,
+                // so the identical scaledToFill transform keeps the two
+                // layers aligned. Drawn above the dim so props read clearly.
+                if let propOverlay = model.livePropOverlay {
+                    Image(uiImage: propOverlay)
+                        .resizable()
+                        .scaledToFill()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
             }
 
             VStack(spacing: 24) {
@@ -201,6 +211,7 @@ struct AttractView: View {
             guard !hasModeChoices else { return }
             model.tapToStart()
         }
+        .task { await model.runLivePropOverlayLoop() }
     }
 
     /// Every offered (shot count, layout) combination — e.g. 3-shot and

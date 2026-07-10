@@ -16,6 +16,13 @@ struct CaptureView: View {
                     .resizable()
                     .scaledToFill()
                     .ignoresSafeArea()
+                if let propOverlay = model.livePropOverlay {
+                    Image(uiImage: propOverlay)
+                        .resizable()
+                        .scaledToFill()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
             }
 
             switch model.step {
@@ -67,5 +74,6 @@ struct CaptureView: View {
             }
         }
         .animation(.easeOut(duration: 0.25), value: model.step)
+        .task { await model.runLivePropOverlayLoop() }
     }
 }

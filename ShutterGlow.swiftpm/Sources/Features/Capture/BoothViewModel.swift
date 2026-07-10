@@ -44,6 +44,10 @@ public final class BoothViewModel: ObservableObject {
     /// faces and burned into the file in finishCapture (or per frame for
     /// Boomerang/GIF). Resets per guest, same as selectedFilter.
     @Published public var selectedProp: PhotoProp = .none
+    /// Transparent props-only frame matching the live view's pixel aspect —
+    /// rendered a few times a second by runLivePropOverlayLoop() and layered
+    /// over the live feed for an AR-style preview of the guest's prop pick.
+    @Published public private(set) var livePropOverlay: UIImage?
 
     private var transport: PTPIPTransport?
     private var camera: EOSCamera?
@@ -477,7 +481,38 @@ public final class BoothViewModel: ObservableObject {
         liveViewImage = liveViewImage // keep last frame visible during transition
         selectedFilter = .none
         selectedProp = .none
+        livePropOverlay = nil
         step = .attract
+    }
+
+    // MARK: - Live prop preview
+
+    /// Views showing live view run this for their lifetime (`.task {}` —
+    /// cancelled automatically on disappear). ~3.5 scans/sec: fresh enough
+    /// that props visibly track faces, cheap enough not to fight the live
+    /// feed for CPU. The overlay is nil (nothing drawn) whenever no prop is
+    /// picked, props are disabled, or no face is currently detectable.
+    public func runLivePropOverlayLoop() async {
+        while !Task.isCancelled {
+            await refreshLivePropOverlay()
+            try? await Task.sleep(nanoseconds: 280_000_000)
+        }
+    }
+
+    private func refreshLivePropOverlay() async {
+        guard config.ai.props, selectedProp != .none,
+              let jpeg = liveViewImage?.jpegData(compressionQuality: 0.6) else {
+            livePropOverlay = nil
+            return
+        }
+        let prop = selectedProp
+        let overlay = await Task.detached(priority: .utility) {
+            FacePropRenderer.overlayImage(prop, matching: jpeg)
+        }.value
+        // Prop may have changed while the scan ran — drop a stale render
+        // rather than flashing the previous prop's shapes.
+        guard selectedProp == prop else { return }
+        livePropOverlay = overlay
     }
 
     // MARK: - Live face analysis (smile shutter / face count)

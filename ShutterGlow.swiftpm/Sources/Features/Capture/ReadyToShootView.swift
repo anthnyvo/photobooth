@@ -22,6 +22,13 @@ struct ReadyToShootView: View {
                     .scaledToFill()
                     .ignoresSafeArea()
                     .overlay(Chassis.base.opacity(0.35).ignoresSafeArea())
+                if let propOverlay = model.livePropOverlay {
+                    Image(uiImage: propOverlay)
+                        .resizable()
+                        .scaledToFill()
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
             }
 
             VStack {
@@ -73,6 +80,7 @@ struct ReadyToShootView: View {
         .contentShape(Rectangle())
         .onTapGesture { model.confirmReadyToShoot() }
         .onAppear { model.scheduleAutoReturn(after: 15) }
+        .task { await model.runLivePropOverlayLoop() }
         .task {
             // Smile-shutter poll — ~2 scans/sec on the live feed, cancelled
             // automatically when this view leaves (touch, back, timeout).
