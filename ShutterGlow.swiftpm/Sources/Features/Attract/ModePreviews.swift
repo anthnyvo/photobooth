@@ -130,6 +130,162 @@ struct StripPreview: View {
     }
 }
 
+/// Filter preview: the same polaroid, tinted to approximate each look —
+/// enough visual difference that guests compare looks at a glance without
+/// running Core Image per card.
+struct FilterPreview: View {
+    let filter: PhotoFilter
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PhotoSwatch()
+                .aspectRatio(4 / 3, contentMode: .fit)
+                .saturation(saturation)
+                .contrast(contrast)
+                .overlay(tint)
+                .clipShape(RoundedRectangle(cornerRadius: 1.5, style: .continuous))
+            Spacer(minLength: 0)
+        }
+        .padding(5)
+        .frame(width: 62, height: 68)
+        .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Color.white))
+        .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
+        .rotationEffect(.degrees(-3))
+    }
+
+    private var saturation: Double {
+        switch filter {
+        case .blackAndWhite: 0
+        case .sepia: 0.25
+        case .vivid: 1.7
+        case .faded: 0.6
+        default: 1
+        }
+    }
+
+    private var contrast: Double {
+        switch filter {
+        case .vivid: 1.15
+        case .faded: 0.85
+        default: 1
+        }
+    }
+
+    @ViewBuilder
+    private var tint: some View {
+        switch filter {
+        case .retro:
+            Color(red: 0.95, green: 0.62, blue: 0.30).opacity(0.28)
+        case .sepia:
+            Color(red: 0.62, green: 0.44, blue: 0.22).opacity(0.4)
+        case .faded:
+            Color.white.opacity(0.22)
+        default:
+            Color.clear
+        }
+    }
+}
+
+/// Prop preview: a simple face with the prop drawn on it — same shapes the
+/// real renderer burns into the photo, miniaturized.
+struct PropPreview: View {
+    let prop: PhotoProp
+
+    var body: some View {
+        ZStack {
+            // face
+            Circle()
+                .fill(Color(red: 0.94, green: 0.80, blue: 0.64))
+                .frame(width: 52, height: 52)
+            // eyes
+            HStack(spacing: 14) {
+                Circle().fill(Color.black.opacity(0.75)).frame(width: 5, height: 5)
+                Circle().fill(Color.black.opacity(0.75)).frame(width: 5, height: 5)
+            }
+            .offset(y: -4)
+            // smile
+            SmileArc()
+                .stroke(Color.black.opacity(0.6), lineWidth: 2)
+                .frame(width: 18, height: 9)
+                .offset(y: 11)
+
+            propShapes
+        }
+        .frame(width: 74, height: 80)
+    }
+
+    @ViewBuilder
+    private var propShapes: some View {
+        switch prop {
+        case .none:
+            EmptyView()
+        case .sunglasses:
+            HStack(spacing: 3) {
+                Circle().fill(Color.black.opacity(0.9)).frame(width: 16, height: 16)
+                Rectangle().fill(Color.black.opacity(0.9)).frame(width: 4, height: 2.5)
+                Circle().fill(Color.black.opacity(0.9)).frame(width: 16, height: 16)
+            }
+            .offset(y: -4)
+        case .mustache:
+            Capsule()
+                .fill(Color(red: 0.16, green: 0.10, blue: 0.06))
+                .frame(width: 22, height: 6)
+                .offset(y: 6)
+        case .dogEars:
+            HStack(spacing: 24) {
+                Ellipse().fill(Color(red: 0.55, green: 0.36, blue: 0.20)).frame(width: 14, height: 20)
+                Ellipse().fill(Color(red: 0.55, green: 0.36, blue: 0.20)).frame(width: 14, height: 20)
+            }
+            .offset(y: -25)
+            Ellipse().fill(Color.black.opacity(0.9)).frame(width: 11, height: 8).offset(y: 4)
+        case .crown:
+            CrownShape()
+                .fill(Color(red: 0.96, green: 0.77, blue: 0.26))
+                .frame(width: 36, height: 18)
+                .offset(y: -33)
+        case .hearts:
+            ForEach(0..<3, id: \.self) { index in
+                Text("♥")
+                    .font(.system(size: 13 + CGFloat(index) * 2))
+                    .foregroundStyle(Color(red: 0.92, green: 0.26, blue: 0.38))
+                    .offset(
+                        x: [-28, 0, 28][index],
+                        y: [-18, -32, -18][index]
+                    )
+            }
+        }
+    }
+}
+
+private struct SmileArc: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addArc(
+            center: CGPoint(x: rect.midX, y: rect.minY),
+            radius: rect.width / 2,
+            startAngle: .degrees(30), endAngle: .degrees(150),
+            clockwise: false
+        )
+        return path
+    }
+}
+
+private struct CrownShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        for spike in 0..<3 {
+            let left = rect.minX + rect.width * CGFloat(spike) / 3
+            path.addLine(to: CGPoint(x: left, y: rect.maxY * 0.5))
+            path.addLine(to: CGPoint(x: left + rect.width / 6, y: rect.minY))
+            path.addLine(to: CGPoint(x: left + rect.width / 3, y: rect.maxY * 0.5))
+        }
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
 /// GIF/Boomerang: a photo frame with motion cues — offset ghost frames
 /// behind, and a badge naming the format.
 struct AnimatedPreview: View {
