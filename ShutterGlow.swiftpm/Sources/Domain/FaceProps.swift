@@ -119,13 +119,27 @@ enum FacePropRenderer {
         image = image.downscaled(maxWidth: 2000)
         guard let cgImage = image.cgImage else { return photoData }
 
-        let faces = FaceVision.detectFaces(in: cgImage, accuracy: accuracy)
+        // Everything below works in PIXEL space (cgImage dimensions), not
+        // UIImage points. downscaled() renders at device scale, so its
+        // 2000-"point" result is 4000+ px on a 2x iPad — detection reports
+        // pixel coordinates, and drawing on a point-sized canvas put every
+        // prop at 2x its position, i.e. off the image entirely (the
+        // "selected a prop but nothing showed up" bug).
+        let pixelSize = CGSize(width: cgImage.width, height: cgImage.height)
+
+        var faces = FaceVision.detectFaces(in: cgImage, accuracy: accuracy)
+        if faces.isEmpty && accuracy == .still {
+            // High-accuracy detector can miss tilted/partial faces the fast
+            // one still catches — a wrong-ish prop beats a silently missing
+            // one at a photobooth.
+            faces = FaceVision.detectFaces(in: cgImage, accuracy: .live)
+        }
         guard !faces.isEmpty else { return photoData }
 
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
-        let rendered = UIGraphicsImageRenderer(size: image.size, format: format).image { context in
-            image.draw(at: .zero)
+        let rendered = UIGraphicsImageRenderer(size: pixelSize, format: format).image { context in
+            image.draw(in: CGRect(origin: .zero, size: pixelSize))
             let cg = context.cgContext
             for face in faces {
                 draw(prop, on: face, in: cg)
