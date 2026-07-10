@@ -9,6 +9,7 @@ struct AttractView: View {
     /// Pick-then-confirm: tapping a mode highlights it; only the Start pill
     /// actually begins the session. Defaults to Single Photo.
     @State private var selectedMode: Mode = .single
+    @State private var selectedCategory: Category = .photo
 
     /// Whether the event offers any choice beyond a plain single photo —
     /// drives the pick-then-confirm UI vs. the direct shutter button.
@@ -51,32 +52,50 @@ struct AttractView: View {
                 }
 
                 if hasModeChoices {
-                    // Every mode the event offers gets its own button —
-                    // Single, each (count, layout) strip combination, and
-                    // Boomerang/GIF. Tapping highlights the pick; the Start
-                    // pill below confirms it, so guests can browse without
-                    // the countdown flow firing on the first touch.
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 32) {
-                            DialButton(label: "Single Photo", systemImage: "camera", isSelected: selectedMode == .single, diameter: 92) {
-                                selectedMode = .single
-                            }
-                            if model.config.strip.enabled {
-                                ForEach(stripOptions) { option in
-                                    DialButton(label: option.label, systemImage: "photo.stack.fill", isSelected: selectedMode == .strip(option), diameter: 92) {
-                                        selectedMode = .strip(option)
-                                    }
+                    // Two-level picker: category tabs (Photo / Strips /
+                    // Animated) so the row never turns into one long
+                    // cluttered scroll, and each option inside a category
+                    // renders as a miniature of the actual output — a
+                    // 3-shot strip option IS a tiny 3-frame strip — so
+                    // guests can see what they're getting, not decode an
+                    // icon. Start pill below still confirms.
+                    VStack(spacing: 18) {
+                        HStack(spacing: 10) {
+                            ForEach(categories, id: \.self) { category in
+                                Button {
+                                    selectCategory(category)
+                                } label: {
+                                    Text(category.rawValue)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(selectedCategory == category ? Color.black : Chassis.textPrimary)
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 20)
+                                        .background(
+                                            Capsule().fill(selectedCategory == category
+                                                ? AnyShapeStyle(Color.white)
+                                                : AnyShapeStyle(.ultraThinMaterial))
+                                        )
+                                        .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
                                 }
-                            }
-                            if model.config.animationsEnabled {
-                                ForEach(AnimatedStyle.allCases) { style in
-                                    DialButton(label: style.displayName, systemImage: style.systemImage, isSelected: selectedMode == .animated(style), diameter: 92) {
-                                        selectedMode = .animated(style)
-                                    }
-                                }
+                                .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal, 24)
+
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 18) {
+                                ForEach(modes(in: selectedCategory), id: \.self) { mode in
+                                    ModePreviewCard(
+                                        title: title(for: mode),
+                                        isSelected: selectedMode == mode,
+                                        action: { selectedMode = mode }
+                                    ) {
+                                        art(for: mode)
+                                    }
+                                }
+                            }
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 6)
+                        }
                     }
                 } else {
                     // Shutter-ring start control: outer hairline ring, accent
@@ -226,13 +245,66 @@ struct AttractView: View {
         }
     }
 
-    private enum Mode: Equatable {
+    // MARK: - Categories
+
+    /// Top-level grouping for the two-level mode picker — only categories
+    /// the event actually offers appear.
+    private var categories: [Category] {
+        var result: [Category] = [.photo]
+        if model.config.strip.enabled { result.append(.strips) }
+        if model.config.animationsEnabled { result.append(.animated) }
+        return result
+    }
+
+    private func modes(in category: Category) -> [Mode] {
+        switch category {
+        case .photo: [.single]
+        case .strips: stripOptions.map(Mode.strip)
+        case .animated: AnimatedStyle.allCases.map(Mode.animated)
+        }
+    }
+
+    /// Switching category auto-selects its first option so the Start pill
+    /// always fires something visible on screen.
+    private func selectCategory(_ category: Category) {
+        selectedCategory = category
+        if let first = modes(in: category).first {
+            selectedMode = first
+        }
+    }
+
+    private func title(for mode: Mode) -> String {
+        switch mode {
+        case .single: "Single Photo"
+        case .strip(let option): option.label
+        case .animated(let style): style.displayName
+        }
+    }
+
+    private func art(for mode: Mode) -> AnyView {
+        switch mode {
+        case .single:
+            AnyView(SinglePolaroidPreview())
+        case .strip(let option):
+            AnyView(StripPreview(count: option.count, layout: option.layout))
+        case .animated(let style):
+            AnyView(AnimatedPreview(style: style))
+        }
+    }
+
+    private enum Category: String, Hashable {
+        case photo = "Photo"
+        case strips = "Photo Strips"
+        case animated = "Animated"
+    }
+
+    private enum Mode: Hashable {
         case single
         case strip(StripOption)
         case animated(AnimatedStyle)
     }
 
-    private struct StripOption: Identifiable, Equatable {
+    private struct StripOption: Identifiable, Hashable {
         let count: Int
         let layout: EventConfig.StripOptions.Layout
 
