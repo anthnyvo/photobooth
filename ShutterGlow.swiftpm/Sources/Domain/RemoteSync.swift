@@ -94,6 +94,7 @@ public enum RemoteSync {
                 props: config.liveViewSettings.aiProps ?? false,
                 smileShutter: config.liveViewSettings.smileShutter ?? false
             )
+            local.timelapseEnabled = config.liveViewSettings.timelapseEnabled ?? false
 
             // Newer dashboard rows carry the full offered sets in the
             // jsonb; rows saved before that only have the single
@@ -171,6 +172,7 @@ public enum RemoteSync {
             let stripEnabled: Bool?
             let stripShotCounts: [Int]?
             let stripLayouts: [String]?
+            let timelapseEnabled: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
@@ -182,6 +184,7 @@ public enum RemoteSync {
                 case stripEnabled = "strip_enabled"
                 case stripShotCounts = "strip_shot_counts"
                 case stripLayouts = "strip_layouts"
+                case timelapseEnabled = "timelapse_enabled"
             }
         }
     }
