@@ -148,12 +148,21 @@ private struct FloatingPolaroids: View {
         .allowsHitTesting(false)
         .onAppear { drift = true }
         .task {
-            // Real prints from the active event, if it has any — decoded and
-            // downscaled off-main so four 6000px JPEGs don't stall launch.
-            guard let eventId = EventStorage.shared.currentEventId() else { return }
-            let urls = Array(EventStorage.shared.listPhotos(eventId: eventId)
-                .filter { $0.pathExtension.lowercased() != "gif" }
-                .prefix(4))
+            // Real prints from the active event when it has any (decoded and
+            // downscaled off-main so four 6000px JPEGs don't stall launch);
+            // fresh installs fall back to the bundled sample booth shots so
+            // the splash never shows empty gradient placeholders.
+            var urls: [URL] = []
+            if let eventId = EventStorage.shared.currentEventId() {
+                urls = Array(EventStorage.shared.listPhotos(eventId: eventId)
+                    .filter { $0.pathExtension.lowercased() != "gif" }
+                    .prefix(4))
+            }
+            if urls.isEmpty {
+                urls = (1...4).compactMap {
+                    Bundle.main.url(forResource: "sample-\($0)", withExtension: "jpg")
+                }
+            }
             guard !urls.isEmpty else { return }
             let loaded = await Task.detached(priority: .utility) {
                 urls.compactMap { url in
