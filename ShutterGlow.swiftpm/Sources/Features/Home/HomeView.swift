@@ -167,7 +167,12 @@ private struct FloatingPolaroids: View {
             let loaded = await Task.detached(priority: .utility) {
                 urls.compactMap { url in
                     autoreleasepool {
-                        UIImage(contentsOfFile: url.path)?.downscaled(maxWidth: 360)
+                        // Center-crop to the card's 4:3 up front — letting
+                        // the view fill-crop a tall strip print would show
+                        // a meaningless zoomed sliver of one frame.
+                        UIImage(contentsOfFile: url.path)?
+                            .downscaled(maxWidth: 360)
+                            .croppedToAspectFill(CGSize(width: 360, height: 270))
                     }
                 }
             }.value
@@ -200,7 +205,11 @@ private struct PolaroidCard: View {
                     )
                 }
             }
-            .aspectRatio(4 / 3, contentMode: .fit)
+            // Fixed pixel box + clip: scaledToFill happily overflows a
+            // fitted aspectRatio container (the tall strip samples spilled
+            // right off the print), so the photo area gets hard dimensions
+            // — card 110pt wide minus 7pt padding each side, 4:3.
+            .frame(width: 96, height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
             Spacer(minLength: 0)
         }
