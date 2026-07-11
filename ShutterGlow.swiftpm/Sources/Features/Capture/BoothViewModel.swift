@@ -181,13 +181,28 @@ public final class BoothViewModel: ObservableObject {
     public func connectCamera() {
         lastError = nil
         connectionMessage = "Connecting to \(cameraIPText)…"
+
+        // Sony speaks HTTP (Camera Remote API), not PTP/IP — no transport
+        // handshake to wait on, so it jumps straight to the shared
+        // remote-mode + live-view bring-up.
+        if selectedBrand == .sony {
+            transport = nil
+            let cam = SonyCamera(host: cameraIPText)
+            camera = cam
+            Task {
+                await startRemoteModeAndLiveView()
+            }
+            return
+        }
+
         let wifiTransport = PTPIPTransport(host: cameraIPText)
         transport = wifiTransport
         let cam: any TetheredCamera
         switch selectedBrand {
         case .canonEOS: cam = EOSCamera(transport: wifiTransport)
         case .nikon: cam = NikonCamera(transport: wifiTransport)
-        case .genericPTP: cam = GenericPTPCamera(transport: wifiTransport)
+        case .fujifilm, .genericPTP: cam = GenericPTPCamera(transport: wifiTransport)
+        case .sony: return // handled above
         }
         camera = cam
 

@@ -25,6 +25,8 @@ public protocol TetheredCamera: Actor {
 public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
     case canonEOS
     case nikon
+    case sony
+    case fujifilm
     case genericPTP
 
     public var id: String { rawValue }
@@ -33,6 +35,8 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .canonEOS: "Canon EOS"
         case .nikon: "Nikon (beta)"
+        case .sony: "Sony (beta)"
+        case .fujifilm: "Fujifilm (beta)"
         case .genericPTP: "Other PTP (beta)"
         }
     }
@@ -43,6 +47,10 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
             "Camera in Remote control (EOS Utility) Wi-Fi mode."
         case .nikon:
             "Camera in Wi-Fi/tethering mode with PTP/IP enabled. Untested on hardware — expect rough edges."
+        case .sony:
+            "Camera in Control with Smartphone / Smart Remote mode, iPad joined to the camera's Wi-Fi. Uses Sony's Camera Remote API (many α and RX bodies). Untested on hardware."
+        case .fujifilm:
+            "Camera in wireless tethering mode. Uses standard PTP — capture works, live view doesn't. Untested on hardware."
         case .genericPTP:
             "Any PTP/IP camera. Capture only — live view isn't part of standard PTP, so the screen shows no feed."
         }

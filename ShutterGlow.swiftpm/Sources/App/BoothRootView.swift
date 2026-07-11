@@ -123,25 +123,28 @@ private struct ConnectView: View {
                 // Camera brand — Canon is the hardware-verified path;
                 // Nikon/generic are labeled beta right on the chip.
                 VStack(spacing: 10) {
-                    HStack(spacing: 10) {
-                        ForEach(CameraBrand.allCases) { brand in
-                            Button {
-                                model.selectedBrand = brand
-                            } label: {
-                                Text(brand.displayName)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(model.selectedBrand == brand ? Color.black : Chassis.textPrimary)
-                                    .padding(.vertical, 9)
-                                    .padding(.horizontal, 16)
-                                    .background(
-                                        Capsule().fill(model.selectedBrand == brand
-                                            ? AnyShapeStyle(Color.white)
-                                            : AnyShapeStyle(.ultraThinMaterial))
-                                    )
-                                    .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(CameraBrand.allCases) { brand in
+                                Button {
+                                    model.selectedBrand = brand
+                                } label: {
+                                    Text(brand.displayName)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(model.selectedBrand == brand ? Color.black : Chassis.textPrimary)
+                                        .padding(.vertical, 9)
+                                        .padding(.horizontal, 16)
+                                        .background(
+                                            Capsule().fill(model.selectedBrand == brand
+                                                ? AnyShapeStyle(Color.white)
+                                                : AnyShapeStyle(.ultraThinMaterial))
+                                        )
+                                        .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                                }
+                                .buttonStyle(PressableStyle())
                             }
-                            .buttonStyle(PressableStyle())
                         }
+                        .padding(.horizontal, 24)
                     }
                     Text(model.selectedBrand.connectionHint)
                         .font(.caption)
