@@ -316,7 +316,7 @@ public final class BoothViewModel: ObservableObject {
                 while !Task.isCancelled {
                     if let self, let jpeg = self.liveViewImage?.jpegData(compressionQuality: 0.6) {
                         timelapseFrames.append(jpeg)
-                        if timelapseFrames.count >= 90 { return }
+                        if timelapseFrames.count >= 140 { return }
                     }
                     try? await Task.sleep(nanoseconds: 500_000_000)
                 }
@@ -339,6 +339,12 @@ public final class BoothViewModel: ObservableObject {
             }
         }
         stripProgress = nil
+        // Let the timelapse run ~2.5s past the last flash — the group's
+        // reaction after the final shot is usually the best frame of the
+        // whole thing.
+        if timelapseSampler != nil {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+        }
         timelapseSampler?.cancel()
         finishCapture(shots: shots)
 
