@@ -77,6 +77,10 @@ public final class BoothViewModel: ObservableObject {
     /// the live-view consumer task, drained by the animated capture path.
     private var recordedFrames: [Data] = []
     private var isRecordingFrames = false
+    /// Raw JPEG of the newest live-view frame, kept alongside the decoded
+    /// UIImage so face scans (prop overlay, smile shutter) work straight
+    /// off camera bytes instead of re-encoding the UIImage every pass.
+    private var latestLiveFrameJPEG: Data?
 
     public init(config: EventConfig = EventStorage.shared.loadCurrentOrDefault()) {
         self.config = config
@@ -256,6 +260,7 @@ public final class BoothViewModel: ObservableObject {
                     if let image = UIImage(data: jpeg) {
                         await MainActor.run {
                             self.liveViewImage = image
+                            self.latestLiveFrameJPEG = jpeg
                             if self.isRecordingFrames {
                                 self.recordedFrames.append(jpeg)
                             }
@@ -566,25 +571,26 @@ public final class BoothViewModel: ObservableObject {
     // MARK: - Live prop preview
 
     /// Views showing live view run this for their lifetime (`.task {}` —
-    /// cancelled automatically on disappear). ~3.5 scans/sec: fresh enough
-    /// that props visibly track faces, cheap enough not to fight the live
-    /// feed for CPU. The overlay is nil (nothing drawn) whenever no prop is
-    /// picked, props are disabled, or no face is currently detectable.
+    /// cancelled automatically on disappear). ~11 scans/sec against the raw
+    /// camera JPEG (no re-encode): Vision landmark detection at live-view
+    /// resolution is a few ms on modern iPads, so props visibly stick to
+    /// faces instead of trailing them. The overlay is nil whenever no prop
+    /// is picked, props are disabled, or no face is currently detectable.
     public func runLivePropOverlayLoop() async {
         while !Task.isCancelled {
             await refreshLivePropOverlay()
-            try? await Task.sleep(nanoseconds: 280_000_000)
+            try? await Task.sleep(nanoseconds: 90_000_000)
         }
     }
 
     private func refreshLivePropOverlay() async {
         guard config.ai.props, selectedProp != .none,
-              let jpeg = liveViewImage?.jpegData(compressionQuality: 0.6) else {
+              let jpeg = latestLiveFrameJPEG else {
             livePropOverlay = nil
             return
         }
         let prop = selectedProp
-        let overlay = await Task.detached(priority: .utility) {
+        let overlay = await Task.detached(priority: .userInitiated) {
             FacePropRenderer.overlayImage(prop, matching: jpeg)
         }.value
         // Prop may have changed while the scan ran — drop a stale render
@@ -600,13 +606,13 @@ public final class BoothViewModel: ObservableObject {
         public let smiling: Bool
     }
 
-    /// One low-accuracy face pass over the current live-view frame, off the
-    /// main actor — polled by ReadyToShootView while the smile shutter is
-    /// enabled. Zero faces when live view hasn't produced a frame yet.
-    /// Hands the detached task JPEG bytes rather than a CGImage — Data is
-    /// Sendable, CGImage isn't.
+    /// One face pass over the current live-view frame, off the main actor —
+    /// polled by ReadyToShootView while the smile shutter is enabled. Zero
+    /// faces when live view hasn't produced a frame yet. Uses the raw
+    /// camera JPEG (Sendable Data across the actor hop; no re-encode).
+    /// Smile comes from Vision lip geometry — see FaceVision.
     public func analyzeLiveViewFaces() async -> LiveFaceReading {
-        guard let jpeg = liveViewImage?.jpegData(compressionQuality: 0.7) else {
+        guard let jpeg = latestLiveFrameJPEG else {
             return LiveFaceReading(faceCount: 0, smiling: false)
         }
         return await Task.detached(priority: .utility) {
