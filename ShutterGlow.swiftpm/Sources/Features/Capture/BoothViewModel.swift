@@ -478,24 +478,27 @@ public final class BoothViewModel: ObservableObject {
         let currentProp = selectedProp
         Task {
             let branded = await Task.detached(priority: .userInitiated) {
-                // Props go on per shot, before compositing — faces are at
-                // their largest in the raw frame, and each strip cell gets
-                // its own correctly-anchored prop.
-                let proppedShots = currentProp == .none
-                    ? shots
-                    : shots.map { FacePropRenderer.apply(currentProp, to: $0) }
-                let firstPropped = proppedShots.first ?? firstShot
+                // Props and the filter both go on per shot, BEFORE
+                // compositing: faces are at their largest in the raw frame
+                // (props anchor correctly per strip cell), and filtering
+                // per shot keeps the strip's white gutters and the Polaroid
+                // stock clean white instead of sepia-tinted paper.
+                let processedShots = shots.map { shot in
+                    var processed = shot
+                    if currentProp != .none {
+                        processed = FacePropRenderer.apply(currentProp, to: processed)
+                    }
+                    processed = currentFilter.apply(to: processed)
+                    return processed
+                }
+                let firstProcessed = processedShots.first ?? firstShot
 
                 var composited: Data
-                if proppedShots.count > 1 {
-                    composited = PhotoCompositor.compositeStrip(proppedShots, layout: currentLayout) ?? firstPropped
+                if processedShots.count > 1 {
+                    composited = PhotoCompositor.compositeStrip(processedShots, layout: currentLayout) ?? firstProcessed
                 } else {
-                    composited = firstPropped
+                    composited = firstProcessed
                 }
-                // Filter before overlay/frame so the brand overlay and the
-                // Polaroid border stay unfiltered — only the photo content
-                // gets the look.
-                composited = currentFilter.apply(to: composited)
                 if currentConfig.squareCrop {
                     composited = PhotoCompositor.applySquareCrop(to: composited)
                 }

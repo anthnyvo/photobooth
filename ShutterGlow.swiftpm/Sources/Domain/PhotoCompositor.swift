@@ -56,15 +56,20 @@ enum PhotoCompositor {
     }
 
     /// Stacks shots top-to-bottom, each scaled to a common width (the
-    /// narrowest shot, so nothing gets cropped) with a thin gap between them.
+    /// narrowest shot, so nothing gets cropped), separated by white
+    /// gutters — the classic print-stock look, not black seams (an
+    /// unfilled renderer background encodes to black in JPEG, which is
+    /// exactly how the gaps used to come out).
     private static func compositeVertical(_ images: [UIImage]) -> Data? {
         let width = images.map(\.size.width).min() ?? images[0].size.width
-        let gap: CGFloat = width * 0.02
+        let gap: CGFloat = width * 0.05
         let scaledHeights = images.map { $0.size.height * (width / $0.size.width) }
         let totalHeight = scaledHeights.reduce(0, +) + gap * CGFloat(images.count - 1)
 
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: totalHeight))
-        let composited = renderer.image { _ in
+        let composited = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: CGSize(width: width, height: totalHeight)))
             var y: CGFloat = 0
             for (image, height) in zip(images, scaledHeights) {
                 autoreleasepool {
@@ -77,16 +82,18 @@ enum PhotoCompositor {
     }
 
     /// Shots side by side, each scaled to a common height (the shortest
-    /// shot) with a thin gap between them — a "duo" pair or a wide group
+    /// shot) with white gutters between them — a "duo" pair or a wide group
     /// shot, mirror of the vertical strip's math on the other axis.
     private static func compositeHorizontal(_ images: [UIImage]) -> Data? {
         let height = images.map(\.size.height).min() ?? images[0].size.height
-        let gap: CGFloat = height * 0.02
+        let gap: CGFloat = height * 0.05
         let scaledWidths = images.map { $0.size.width * (height / $0.size.height) }
         let totalWidth = scaledWidths.reduce(0, +) + gap * CGFloat(images.count - 1)
 
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: totalWidth, height: height))
-        let composited = renderer.image { _ in
+        let composited = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: CGSize(width: totalWidth, height: height)))
             var x: CGFloat = 0
             for (image, width) in zip(images, scaledWidths) {
                 autoreleasepool {
@@ -99,21 +106,23 @@ enum PhotoCompositor {
     }
 
     /// Shots arranged in a roughly square grid (ceil(sqrt(n)) columns),
-    /// each cropped to a common cell aspect ratio so the grid lines up
-    /// cleanly instead of leaving ragged gaps.
+    /// each cropped to a common cell aspect ratio, separated by white
+    /// gutters so the grid reads as one printed sheet.
     private static func compositeGrid(_ images: [UIImage]) -> Data? {
         let columns = Int(ceil(sqrt(Double(images.count))))
         let rows = Int(ceil(Double(images.count) / Double(columns)))
         let cellWidth: CGFloat = 1000
         let cellHeight = cellWidth * (images[0].size.height / images[0].size.width)
-        let gap: CGFloat = cellWidth * 0.02
+        let gap: CGFloat = cellWidth * 0.05
 
         let canvasSize = CGSize(
             width: cellWidth * CGFloat(columns) + gap * CGFloat(columns - 1),
             height: cellHeight * CGFloat(rows) + gap * CGFloat(rows - 1)
         )
         let renderer = UIGraphicsImageRenderer(size: canvasSize)
-        let composited = renderer.image { _ in
+        let composited = renderer.image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: canvasSize))
             for (index, image) in images.enumerated() {
                 let col = index % columns
                 let row = index / columns
@@ -154,9 +163,12 @@ enum PhotoCompositor {
     /// the strip crash, just hitting the one path that never got the fix.
     static func addPolaroidFrame(to photoData: Data) -> Data {
         guard let image = UIImage(data: photoData)?.downscaled(maxWidth: 1600) else { return photoData }
-        let sideBorder = image.size.width * 0.045
+        // Matched to the strips' internal white gutters (5% of width) so
+        // outer border and gutters read as one continuous print stock, with
+        // the classic oversized chin along the bottom.
+        let sideBorder = image.size.width * 0.05
         let topBorder = sideBorder
-        let bottomBorder = image.size.width * 0.16
+        let bottomBorder = image.size.width * 0.18
 
         let canvasSize = CGSize(
             width: image.size.width + sideBorder * 2,
