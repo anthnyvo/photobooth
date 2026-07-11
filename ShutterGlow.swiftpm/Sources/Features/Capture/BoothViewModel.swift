@@ -583,14 +583,29 @@ public final class BoothViewModel: ObservableObject {
         }
     }
 
+    /// Last frame a prop scan actually ran against — skips redundant Vision
+    /// passes when live view is paused (mid-capture) or slow, which was
+    /// burning CPU at 11 scans/sec against the same stale frame during the
+    /// exact window the shutter round-trip needs it.
+    private var lastPropScannedFrame: Data?
+
     private func refreshLivePropOverlay() async {
         guard config.ai.props, selectedProp != .none,
               let jpeg = latestLiveFrameJPEG else {
             livePropOverlay = nil
+            lastPropScannedFrame = nil
             return
         }
+        // The flash/shutter window gets the CPU to itself — the overlay
+        // just holds its last render for that beat.
+        guard step != .capturing else { return }
+        // No new frame since the last scan (live view paused or between
+        // polls) → nothing to recompute.
+        guard jpeg != lastPropScannedFrame else { return }
+        lastPropScannedFrame = jpeg
+
         let prop = selectedProp
-        let overlay = await Task.detached(priority: .userInitiated) {
+        let overlay = await Task.detached(priority: .utility) {
             FacePropRenderer.overlayImage(prop, matching: jpeg)
         }.value
         // Prop may have changed while the scan ran — drop a stale render
