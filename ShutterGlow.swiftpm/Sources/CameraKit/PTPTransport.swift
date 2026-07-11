@@ -17,4 +17,13 @@ public extension PTPTransport {
     func send(code: UInt16, parameters: [UInt32] = [], outData: Data? = nil) async throws -> PTPTransactionResult {
         try await send(code: code, parameters: parameters, outData: outData)
     }
+
+    /// Waits for a standard PTP ObjectAdded event and downloads that object
+    /// — the vendor-neutral capture retrieval used by Nikon/generic bodies.
+    /// Default falls back to the transport's Canon-tuned nextCapturedFile
+    /// (which also checks standard ObjectAdded codes), so transports without
+    /// a dedicated event channel still behave sensibly.
+    func nextCapturedFileViaObjectAdded(timeout: TimeInterval) async throws -> Data {
+        try await nextCapturedFile(timeout: timeout)
+    }
 }

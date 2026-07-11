@@ -16,7 +16,8 @@ public actor PTPIPTransport: PTPTransport {
     // bare command/response with no payload.
     private static let dataPhaseOpcodes: Set<UInt16> = [
         CanonOp.getEvent, CanonOp.getViewFinderData, CanonOp.setDevicePropValueEx,
-        CanonOp.getPartialObject, StandardPTPOp.getObjectInfo, StandardPTPOp.getObject
+        CanonOp.getPartialObject, StandardPTPOp.getObjectInfo, StandardPTPOp.getObject,
+        NikonOp.getLiveViewImage
     ]
 
     private let host: String
@@ -328,6 +329,39 @@ public actor PTPIPTransport: PTPTransport {
         }
 
         let objectResult = try await send(code: StandardPTPOp.getObject, parameters: [objectHandle], outData: nil)
+        guard let response = objectResult.response, response.code == PTPResponseCode.ok else {
+            throw TransportError.downloadFailed(underlying: nil)
+        }
+        return objectResult.payload
+    }
+
+    /// Vendor-neutral capture retrieval (Nikon/generic): waits for a
+    /// standard ObjectAdded on the dedicated event connection — the channel
+    /// the PTP/IP spec assigns it to — then downloads the object. Canon
+    /// keeps its own nextCapturedFile above (host-destined EOS captures
+    /// never emit standard ObjectAdded at all).
+    public func nextCapturedFileViaObjectAdded(timeout: TimeInterval) async throws -> Data {
+        let handle: UInt32? = await withTaskGroup(of: UInt32?.self) { group in
+            group.addTask { [objectAddedStream] in
+                for await handle in objectAddedStream {
+                    return handle
+                }
+                return nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        guard let handle else {
+            throw TransportError.timeout("no ObjectAdded event within \(timeout)s of capture")
+        }
+        log("ObjectAdded handle 0x\(String(handle, radix: 16))")
+
+        let objectResult = try await send(code: StandardPTPOp.getObject, parameters: [handle], outData: nil)
         guard let response = objectResult.response, response.code == PTPResponseCode.ok else {
             throw TransportError.downloadFailed(underlying: nil)
         }

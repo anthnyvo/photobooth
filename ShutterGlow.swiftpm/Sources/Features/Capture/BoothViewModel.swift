@@ -54,8 +54,15 @@ public final class BoothViewModel: ObservableObject {
     /// cleared when the guest's session ends.
     @Published public private(set) var timelapseURL: URL?
 
+    /// Attendant's camera-brand pick on the connect screen — persisted so
+    /// one booth setup survives relaunches. Only Canon is hardware-verified;
+    /// Nikon/generic are best-effort beta dialects (see CameraBrand).
+    @Published public var selectedBrand: CameraBrand = CameraBrand.loadSaved() {
+        didSet { selectedBrand.save() }
+    }
+
     private var transport: PTPIPTransport?
-    private var camera: EOSCamera?
+    private var camera: (any TetheredCamera)?
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
     private var returnToAttractTask: Task<Void, Never>?
@@ -176,7 +183,12 @@ public final class BoothViewModel: ObservableObject {
         connectionMessage = "Connecting to \(cameraIPText)…"
         let wifiTransport = PTPIPTransport(host: cameraIPText)
         transport = wifiTransport
-        let cam = EOSCamera(transport: wifiTransport)
+        let cam: any TetheredCamera
+        switch selectedBrand {
+        case .canonEOS: cam = EOSCamera(transport: wifiTransport)
+        case .nikon: cam = NikonCamera(transport: wifiTransport)
+        case .genericPTP: cam = GenericPTPCamera(transport: wifiTransport)
+        }
         camera = cam
 
         eventConsumer?.cancel()

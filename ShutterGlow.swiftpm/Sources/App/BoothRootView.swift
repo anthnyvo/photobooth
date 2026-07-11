@@ -120,6 +120,39 @@ private struct ConnectView: View {
                     .animation(.easeOut(duration: 0.3), value: model.connectionMessage)
                     .entrance(entered, delay: 0.06)
 
+                // Camera brand — Canon is the hardware-verified path;
+                // Nikon/generic are labeled beta right on the chip.
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        ForEach(CameraBrand.allCases) { brand in
+                            Button {
+                                model.selectedBrand = brand
+                            } label: {
+                                Text(brand.displayName)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(model.selectedBrand == brand ? Color.black : Chassis.textPrimary)
+                                    .padding(.vertical, 9)
+                                    .padding(.horizontal, 16)
+                                    .background(
+                                        Capsule().fill(model.selectedBrand == brand
+                                            ? AnyShapeStyle(Color.white)
+                                            : AnyShapeStyle(.ultraThinMaterial))
+                                    )
+                                    .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                            }
+                            .buttonStyle(PressableStyle())
+                        }
+                    }
+                    Text(model.selectedBrand.connectionHint)
+                        .font(.caption)
+                        .foregroundStyle(Chassis.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                        .contentTransition(.opacity)
+                        .animation(.easeOut(duration: 0.25), value: model.selectedBrand)
+                }
+                .entrance(entered, delay: 0.1)
+
                 VStack(spacing: 14) {
                     ChassisLabel(text: "Camera IP", size: 10)
                     HStack(spacing: 12) {
