@@ -18,6 +18,7 @@ struct ShareView: View {
     /// BoothStep.sharing(url), so a plain @State counter is already exactly
     /// "prints used this session," no BoothViewModel bookkeeping needed.
     @State private var printsThisSession = 0
+    @State private var entered = false
 
     var body: some View {
         let uiImage = UIImage(contentsOfFile: photoURL.path)
@@ -32,9 +33,11 @@ struct ShareView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         .padding(10)
                         .chassisPanel()
+                        .entrance(entered)
                 }
 
                 ChassisLabel(text: "Share Your Photo")
+                    .entrance(entered, delay: 0.08)
 
                 HStack(spacing: 36) {
                     if model.config.share.airdrop {
@@ -80,6 +83,7 @@ struct ShareView: View {
                         .opacity(printLimitReached ? 0.4 : 1)
                     }
                 }
+                .entrance(entered, delay: 0.14)
 
                 if printLimitReached {
                     Text("Print limit reached for this guest")
@@ -95,10 +99,14 @@ struct ShareView: View {
                     model.returnToAttract()
                 }
                 .padding(.top, 8)
+                .entrance(entered, delay: 0.22)
             }
             .padding()
         }
-        .onAppear { model.scheduleAutoReturn() }
+        .onAppear {
+            entered = true
+            model.scheduleAutoReturn()
+        }
         .sheet(isPresented: $showingQR) {
             QRShareSheet(image: qrImage, url: qrURL, error: qrError)
         }

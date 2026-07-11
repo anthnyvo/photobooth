@@ -9,6 +9,7 @@ struct ReadyToShootView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
     @State private var faceCount = 0
+    @State private var breathing = false
 
     private var smileShutterOn: Bool { model.config.ai.smileShutter }
 
@@ -68,10 +69,13 @@ struct ReadyToShootView: View {
                     Circle()
                         .fill(Chassis.textPrimary)
                         .padding(18)
+                        .scaleEffect(breathing ? 1.05 : 0.94)
+                        .animation(.easeInOut(duration: 1.4).repeatForever(autoreverses: true), value: breathing)
                 }
                 .frame(width: 108, height: 108)
                 .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
                 .padding(.bottom, 18)
+                .onAppear { breathing = true }
 
                 ChassisLabel(text: smileShutterOn ? "Smile to Shoot — or touch" : "Touch to Shoot")
                 Spacer()

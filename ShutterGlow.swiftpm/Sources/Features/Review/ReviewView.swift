@@ -1,10 +1,14 @@
 import SwiftUI
 
-/// Retake-or-accept screen shown right after capture.
+/// Retake-or-accept screen shown right after capture. The photo "develops"
+/// in — starts washed out and slightly small like a fresh print, then
+/// settles to full contrast with a weighty spring — before the actions
+/// cascade up. A shot arriving should feel like a moment, not a repaint.
 struct ReviewView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
     let photoURL: URL
+    @State private var developed = false
 
     var body: some View {
         ZStack {
@@ -15,6 +19,13 @@ struct ReviewView: View {
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .overlay(
+                            // develop wash — white veil that lifts
+                            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                .fill(Color.white)
+                                .opacity(developed ? 0 : 0.85)
+                        )
+                        .saturation(developed ? 1 : 0.3)
                         .overlay(alignment: .topTrailing) {
                             // GIFs preview as their first frame here (SwiftUI
                             // Image doesn't animate) — badge makes clear the
@@ -31,6 +42,9 @@ struct ReviewView: View {
                         .chassisPanel()
                         .padding(.horizontal, 24)
                         .padding(.top, 24)
+                        .scaleEffect(developed ? 1 : 0.92)
+                        .rotationEffect(.degrees(developed ? 0 : -1.5))
+                        .animation(.spring(duration: 0.9, bounce: 0.22), value: developed)
                 } else {
                     Text("Couldn't load photo").foregroundStyle(Chassis.textPrimary)
                 }
@@ -44,7 +58,12 @@ struct ReviewView: View {
                     }
                 }
                 .padding(.bottom, 40)
+                .entrance(developed, delay: 0.35)
             }
+        }
+        .sensoryFeedback(.success, trigger: developed)
+        .onAppear {
+            withAnimation { developed = true }
         }
     }
 }

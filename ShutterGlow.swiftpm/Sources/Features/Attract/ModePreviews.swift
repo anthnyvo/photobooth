@@ -27,8 +27,11 @@ struct ModePreviewCard: View {
                         .strokeBorder(isSelected ? Color.white : Chassis.hairline, lineWidth: isSelected ? 2 : 1)
                 )
                 .shadow(color: .black.opacity(isSelected ? 0.45 : 0.25), radius: 10, y: 4)
-                .scaleEffect(isSelected ? 1.0 : 0.94)
-                .animation(.easeOut(duration: 0.15), value: isSelected)
+                // selected card lifts and glows faintly white — the pick
+                // should look lit, not just outlined
+                .shadow(color: .white.opacity(isSelected ? 0.18 : 0), radius: 16)
+                .scaleEffect(isSelected ? 1.04 : 0.94)
+                .animation(.spring(duration: 0.35, bounce: 0.3), value: isSelected)
 
                 ChassisLabel(text: title, size: 10)
             }

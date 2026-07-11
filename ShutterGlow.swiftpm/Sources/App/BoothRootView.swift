@@ -64,11 +64,17 @@ struct BoothRootView: View {
 
 /// Attendant setup step: connect to the camera over Wi-Fi before the guest
 /// flow can start. Camera must already be in Remote control (EOS Utility)
-/// mode with the iPad/iPhone joined to its network.
+/// mode with the iPad/iPhone joined to its network. While a connect attempt
+/// is running, radar rings pulse outward from the camera mark.
 private struct ConnectView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
     @State private var showAdmin = false
+    @State private var entered = false
+
+    private var isConnecting: Bool {
+        model.connectionMessage.contains("…")
+    }
 
     var body: some View {
         ZStack {
@@ -86,6 +92,12 @@ private struct ConnectView: View {
 
             VStack(spacing: 24) {
                 ZStack {
+                    if isConnecting {
+                        // radar pulse — expanding, fading rings
+                        ForEach(0..<3, id: \.self) { ring in
+                            PulseRing(delay: Double(ring) * 0.55)
+                        }
+                    }
                     Circle()
                         .fill(.ultraThinMaterial)
                     Circle()
@@ -93,15 +105,20 @@ private struct ConnectView: View {
                     Image(systemName: "camera")
                         .font(.system(size: 40, weight: .medium))
                         .foregroundStyle(Chassis.textPrimary)
+                        .symbolEffect(.pulse, options: .repeating, isActive: isConnecting)
                 }
                 .frame(width: 116, height: 116)
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 5)
+                .entrance(entered)
 
                 Text(model.connectionMessage)
                     .font(.callout)
                     .foregroundStyle(Chassis.textPrimary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
+                    .contentTransition(.opacity)
+                    .animation(.easeOut(duration: 0.3), value: model.connectionMessage)
+                    .entrance(entered, delay: 0.06)
 
                 VStack(spacing: 14) {
                     ChassisLabel(text: "Camera IP", size: 10)
@@ -142,12 +159,33 @@ private struct ConnectView: View {
 
                 GhostButton(title: "Event Setup") { showAdmin = true }
                     .padding(.top, 20)
+                    .entrance(entered, delay: 0.18)
             }
         }
+        .onAppear { entered = true }
         .sheet(isPresented: $showAdmin) {
             PINGate {
                 AdminView(model: model)
             }
         }
+    }
+}
+
+/// One expanding radar ring — scales out from the mark and fades, on a
+/// staggered repeating loop.
+private struct PulseRing: View {
+    let delay: Double
+    @State private var animating = false
+
+    var body: some View {
+        Circle()
+            .strokeBorder(Chassis.accent.opacity(0.5), lineWidth: 1.5)
+            .scaleEffect(animating ? 2.4 : 1)
+            .opacity(animating ? 0 : 0.8)
+            .animation(
+                .easeOut(duration: 1.8).repeatForever(autoreverses: false).delay(delay),
+                value: animating
+            )
+            .onAppear { animating = true }
     }
 }

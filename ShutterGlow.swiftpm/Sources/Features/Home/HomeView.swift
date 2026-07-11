@@ -99,10 +99,13 @@ private struct ShutterRingMark: View {
 }
 
 /// Ambient layer: tilted polaroid prints drifting slowly behind the content
-/// — photobooth output as the room's wallpaper. Deterministic parameters
+/// — photobooth output as the room's wallpaper. Uses the current event's
+/// real photos when any exist (downscaled off-main), falling back to the
+/// gradient placeholder cards on a fresh install. Deterministic parameters
 /// (no randomness) so it looks composed, not scattered.
 private struct FloatingPolaroids: View {
     @State private var drift = false
+    @State private var thumbnails: [UIImage] = []
 
     private struct Card {
         let x: CGFloat, y: CGFloat
@@ -123,7 +126,7 @@ private struct FloatingPolaroids: View {
         GeometryReader { geo in
             ZStack {
                 ForEach(Array(cards.enumerated()), id: \.offset) { index, card in
-                    PolaroidCard()
+                    PolaroidCard(photo: index < thumbnails.count ? thumbnails[index] : nil)
                         .scaleEffect(card.scale)
                         .rotationEffect(.degrees(card.angle + (drift ? 3 : -3)))
                         .position(
@@ -144,15 +147,41 @@ private struct FloatingPolaroids: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .onAppear { drift = true }
+        .task {
+            // Real prints from the active event, if it has any — decoded and
+            // downscaled off-main so four 6000px JPEGs don't stall launch.
+            guard let eventId = EventStorage.shared.currentEventId() else { return }
+            let urls = Array(EventStorage.shared.listPhotos(eventId: eventId)
+                .filter { $0.pathExtension.lowercased() != "gif" }
+                .prefix(4))
+            guard !urls.isEmpty else { return }
+            let loaded = await Task.detached(priority: .utility) {
+                urls.compactMap { url in
+                    autoreleasepool {
+                        UIImage(contentsOfFile: url.path)?.downscaled(maxWidth: 360)
+                    }
+                }
+            }.value
+            withAnimation(.easeIn(duration: 0.8)) {
+                thumbnails = loaded
+            }
+        }
     }
 }
 
-/// One background polaroid — white stock, dusty gradient "photo".
+/// One background polaroid — white stock; a real event photo when one is
+/// available, the dusty gradient placeholder otherwise.
 private struct PolaroidCard: View {
+    var photo: UIImage? = nil
+
     var body: some View {
         VStack(spacing: 0) {
-            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                .fill(
+            Group {
+                if let photo {
+                    Image(uiImage: photo)
+                        .resizable()
+                        .scaledToFill()
+                } else {
                     LinearGradient(
                         colors: [
                             Color(red: 0.45, green: 0.40, blue: 0.52),
@@ -160,8 +189,10 @@ private struct PolaroidCard: View {
                         ],
                         startPoint: .topLeading, endPoint: .bottomTrailing
                     )
-                )
-                .aspectRatio(4 / 3, contentMode: .fit)
+                }
+            }
+            .aspectRatio(4 / 3, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
             Spacer(minLength: 0)
         }
         .padding(7)

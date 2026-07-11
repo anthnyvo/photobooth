@@ -39,6 +39,11 @@ public enum Chassis {
 /// enough that glass cards and white type carry the contrast, the blooms
 /// just keep it from reading as flat black.
 struct ChassisBackground: View {
+    /// Ambient drift — the blooms wander slowly forever, so no screen in
+    /// the app is ever fully static. Core Animation drives it (repeating
+    /// spring offsets), no per-frame CPU.
+    @State private var drift = false
+
     var body: some View {
         ZStack {
             Chassis.base
@@ -52,24 +57,29 @@ struct ChassisBackground: View {
             )
             .opacity(0.9)
             Circle()
-                .fill(Color(red: 0.87, green: 0.55, blue: 0.30).opacity(0.22))
+                .fill(Color(red: 0.87, green: 0.55, blue: 0.30).opacity(drift ? 0.26 : 0.18))
                 .frame(width: 420, height: 420)
                 .blur(radius: 100)
-                .offset(x: -150, y: -280)
+                .offset(x: drift ? -110 : -170, y: drift ? -250 : -300)
+                .animation(.easeInOut(duration: 11).repeatForever(autoreverses: true), value: drift)
             Circle()
-                .fill(Color(red: 0.52, green: 0.42, blue: 0.72).opacity(0.22))
+                .fill(Color(red: 0.52, green: 0.42, blue: 0.72).opacity(drift ? 0.18 : 0.26))
                 .frame(width: 380, height: 380)
                 .blur(radius: 110)
-                .offset(x: 170, y: 320)
+                .offset(x: drift ? 200 : 140, y: drift ? 290 : 340)
+                .animation(.easeInOut(duration: 13).repeatForever(autoreverses: true), value: drift)
         }
         .ignoresSafeArea()
+        .onAppear { drift = true }
     }
 }
 
 extension View {
     /// Real frosted-glass card: `.ultraThinMaterial` blur (not a flat
-    /// semi-opaque color) so the gradient backdrop actually shows through
-    /// blurred, plus a hairline stroke and big modern corner radius.
+    /// semi-opaque color) so the backdrop shows through blurred, plus a
+    /// top-lit gradient hairline — brighter along the top edge, fading down
+    /// — which is what makes glass read as a lit physical surface instead
+    /// of an outlined rectangle.
     func chassisPanel(cornerRadius: CGFloat = 28) -> some View {
         background(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -77,8 +87,23 @@ extension View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(Chassis.hairline, lineWidth: 1)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.28), Color.white.opacity(0.06)],
+                        startPoint: .top, endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
         )
+    }
+
+    /// Standard staggered entrance: rise + fade with a weighty spring,
+    /// offset by `delay` so sibling elements cascade instead of appearing
+    /// as one block. Drive with a Bool the container flips in onAppear.
+    func entrance(_ shown: Bool, delay: Double = 0) -> some View {
+        opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : 22)
+            .animation(.spring(duration: 0.65, bounce: 0.18).delay(delay), value: shown)
     }
 }
 

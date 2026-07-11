@@ -11,6 +11,7 @@ struct LoginView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var isSubmitting = false
+    @State private var entered = false
 
     var body: some View {
         ZStack {
@@ -28,6 +29,7 @@ struct LoginView: View {
                 }
                 .frame(width: 96, height: 96)
                 .shadow(color: .black.opacity(0.4), radius: 12, y: 5)
+                .entrance(entered)
 
                 VStack(spacing: 6) {
                     Text("Sign in")
@@ -39,6 +41,7 @@ struct LoginView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
+                .entrance(entered, delay: 0.06)
 
                 VStack(spacing: 12) {
                     TextField("Email", text: $email)
@@ -63,6 +66,7 @@ struct LoginView: View {
                         .onSubmit(submit)
                 }
                 .frame(maxWidth: 320)
+                .entrance(entered, delay: 0.12)
 
                 if let error = model.lastError {
                     Text(error)
@@ -73,12 +77,14 @@ struct LoginView: View {
                 }
 
                 PillButton(title: isSubmitting ? "Signing in…" : "Sign in", action: submit)
+                    .entrance(entered, delay: 0.18)
 
                 Spacer()
             }
             .padding()
         }
         .statusBarHidden()
+        .onAppear { entered = true }
     }
 
     private func submit() {

@@ -13,6 +13,7 @@ struct AttractView: View {
     /// actually begins the session. Defaults to Single Photo.
     @State private var selectedMode: Mode = .single
     @State private var selectedCategory: Category = .photo
+    @State private var entered = false
 
     /// Whether anything is choosable at all — with every category off, the
     /// screen keeps the plain shutter-ring/tap-anywhere flow instead.
@@ -77,19 +78,32 @@ struct AttractView: View {
                                             )
                                             .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(PressableStyle())
                                 }
                             }
                             .padding(.horizontal, 24)
                         }
+                        .entrance(entered, delay: 0.05)
 
+                        // Options slide in from the trailing edge when the
+                        // category changes — reads as flipping to the next
+                        // page rather than content teleporting.
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 18) {
                                 categoryContent
                             }
                             .padding(.horizontal, 24)
                             .padding(.vertical, 6)
+                            .id(selectedCategory)
+                            .transition(
+                                .asymmetric(
+                                    insertion: .move(edge: .trailing).combined(with: .opacity),
+                                    removal: .opacity
+                                )
+                            )
                         }
+                        .animation(.spring(duration: 0.45, bounce: 0.12), value: selectedCategory)
+                        .entrance(entered, delay: 0.1)
                     }
 
                     // The confirm step — every pick above only marks a
@@ -107,6 +121,7 @@ struct AttractView: View {
                         selectedMode = .single
                     }
                     .padding(.top, 8)
+                    .entrance(entered, delay: 0.16)
                 } else {
                     // Shutter-ring start control: outer hairline ring, accent
                     // inner disc — reads as a camera control, not a web button.
@@ -158,6 +173,7 @@ struct AttractView: View {
             guard !hasPicker else { return }
             model.tapToStart()
         }
+        .onAppear { entered = true }
         .task { await model.runLivePropOverlayLoop() }
         // Light haptic tick on every pick — selection should feel physical.
         .sensoryFeedback(.selection, trigger: selectedMode)
