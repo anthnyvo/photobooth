@@ -43,8 +43,7 @@ let package = Package(
             name: "AppModule",
             path: "Sources",
             resources: [
-                .process("Assets.xcassets"),
-                .process("SamplePhotos")
+                .process("Assets.xcassets")
             ]
         )
     ]

@@ -99,13 +99,10 @@ private struct ShutterRingMark: View {
 }
 
 /// Ambient layer: tilted polaroid prints drifting slowly behind the content
-/// — photobooth output as the room's wallpaper. Uses the current event's
-/// real photos when any exist (downscaled off-main), falling back to the
-/// gradient placeholder cards on a fresh install. Deterministic parameters
+/// — photobooth output as the room's wallpaper. Deterministic parameters
 /// (no randomness) so it looks composed, not scattered.
 private struct FloatingPolaroids: View {
     @State private var drift = false
-    @State private var thumbnails: [UIImage] = []
 
     private struct Card {
         let x: CGFloat, y: CGFloat
@@ -126,7 +123,7 @@ private struct FloatingPolaroids: View {
         GeometryReader { geo in
             ZStack {
                 ForEach(Array(cards.enumerated()), id: \.offset) { index, card in
-                    PolaroidCard(photo: index < thumbnails.count ? thumbnails[index] : nil)
+                    PolaroidCard()
                         .scaleEffect(card.scale)
                         .rotationEffect(.degrees(card.angle + (drift ? 3 : -3)))
                         .position(
@@ -147,68 +144,20 @@ private struct FloatingPolaroids: View {
         .ignoresSafeArea()
         .allowsHitTesting(false)
         .onAppear { drift = true }
-        .task {
-            // Real prints from the active event when it has any (decoded and
-            // downscaled off-main so four 6000px JPEGs don't stall launch);
-            // fresh installs fall back to the bundled sample booth shots so
-            // the splash never shows empty gradient placeholders.
-            var urls: [URL] = []
-            if let eventId = EventStorage.shared.currentEventId() {
-                urls = Array(EventStorage.shared.listPhotos(eventId: eventId)
-                    .filter { $0.pathExtension.lowercased() != "gif" }
-                    .prefix(4))
-            }
-            if urls.isEmpty {
-                urls = (1...4).compactMap {
-                    Bundle.main.url(forResource: "sample-\($0)", withExtension: "jpg")
-                }
-            }
-            guard !urls.isEmpty else { return }
-            let loaded = await Task.detached(priority: .utility) {
-                urls.compactMap { url in
-                    autoreleasepool {
-                        // Center-crop to the card's 4:3 up front — letting
-                        // the view fill-crop a tall strip print would show
-                        // a meaningless zoomed sliver of one frame.
-                        UIImage(contentsOfFile: url.path)?
-                            .downscaled(maxWidth: 360)
-                            .croppedToAspectFill(CGSize(width: 360, height: 270))
-                    }
-                }
-            }.value
-            withAnimation(.easeIn(duration: 0.8)) {
-                thumbnails = loaded
-            }
-        }
     }
 }
 
-/// One background polaroid — white stock; a real event photo when one is
-/// available, the dusty gradient placeholder otherwise.
+/// One background polaroid — white stock, dusty gradient "photo".
 private struct PolaroidCard: View {
-    var photo: UIImage? = nil
-
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                if let photo {
-                    Image(uiImage: photo)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.45, green: 0.40, blue: 0.52),
-                            Color(red: 0.30, green: 0.26, blue: 0.36)
-                        ],
-                        startPoint: .topLeading, endPoint: .bottomTrailing
-                    )
-                }
-            }
-            // Fixed pixel box + clip: scaledToFill happily overflows a
-            // fitted aspectRatio container (the tall strip samples spilled
-            // right off the print), so the photo area gets hard dimensions
-            // — card 110pt wide minus 7pt padding each side, 4:3.
+            LinearGradient(
+                colors: [
+                    Color(red: 0.45, green: 0.40, blue: 0.52),
+                    Color(red: 0.30, green: 0.26, blue: 0.36)
+                ],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
             .frame(width: 96, height: 72)
             .clipShape(RoundedRectangle(cornerRadius: 2, style: .continuous))
             Spacer(minLength: 0)
