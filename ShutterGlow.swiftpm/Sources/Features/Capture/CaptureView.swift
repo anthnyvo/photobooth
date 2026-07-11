@@ -49,8 +49,9 @@ struct CaptureView: View {
                     )
                     .sensoryFeedback(.impact(weight: .light), trigger: remaining)
             case .capturing:
+                // Fully opaque — at 0.9 the dark live feed bled through and
+                // read as a rendering bug rather than a flash.
                 Color.white.ignoresSafeArea()
-                    .opacity(0.9)
                     .transition(.opacity)
             case .recording:
                 // Boomerang/GIF recording — live view stays fully visible
@@ -72,7 +73,9 @@ struct CaptureView: View {
                 EmptyView()
             }
 
-            if let progress = model.stripProgress {
+            // Hidden while the flash is up — a dark glass pill floating on
+            // the white flash looked like a broken patch of screen.
+            if let progress = model.stripProgress, !isCapturing {
                 VStack {
                     ChassisLabel(text: "Shot \(progress.shot) of \(progress.total)", size: 13)
                         .padding(.vertical, 8)
@@ -81,6 +84,7 @@ struct CaptureView: View {
                         .padding(.top, 24)
                     Spacer()
                 }
+                .transition(.opacity)
             }
         }
         .animation(.easeOut(duration: 0.25), value: model.step)
