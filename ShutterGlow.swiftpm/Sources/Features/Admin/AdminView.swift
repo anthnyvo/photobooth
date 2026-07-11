@@ -46,6 +46,7 @@ struct AdminView: View {
     @State private var animationsEnabled = true
     @State private var aiProps = false
     @State private var aiSmileShutter = false
+    @State private var timelapseEnabled = false
     @State private var selectedLogo: PhotosPickerItem?
     @State private var logoData: Data?
     @State private var selectedOverlay: PhotosPickerItem?
@@ -101,6 +102,11 @@ struct AdminView: View {
                     SetupCard(title: "Photo Strip") {
                         GlassToggle(title: "Enable photo strip", isOn: $stripEnabled)
                         if stripEnabled {
+                            GlassToggle(
+                                title: "Guest timelapse",
+                                subtitle: "Records the whole strip session — countdowns, pose scrambles and all — into a fast behind-the-scenes GIF guests can share.",
+                                isOn: $timelapseEnabled
+                            )
                             ChipGroupLabel(text: "Shot counts offered")
                             HStack(spacing: 10) {
                                 ForEach([2, 3, 4, 5, 6], id: \.self) { count in
@@ -350,6 +356,7 @@ struct AdminView: View {
         animationsEnabled = current.animationsEnabled
         aiProps = current.ai.props
         aiSmileShutter = current.ai.smileShutter
+        timelapseEnabled = current.timelapseEnabled
     }
 
     private func save() {
@@ -370,6 +377,7 @@ struct AdminView: View {
             squareCrop: squareCrop,
             filtersEnabled: filtersEnabled,
             animationsEnabled: animationsEnabled,
+            timelapseEnabled: timelapseEnabled,
             ai: .init(props: aiProps, smileShutter: aiSmileShutter)
         )
         do {

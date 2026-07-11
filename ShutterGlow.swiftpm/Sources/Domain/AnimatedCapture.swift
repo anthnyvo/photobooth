@@ -36,7 +36,7 @@ enum AnimatedCapture {
     /// overlay/Polaroid are deliberately not: those are static-print
     /// concepts and would need per-frame compositing for no real payoff on
     /// a phone-screen GIF.
-    static func encodeGIF(frames: [Data], style: AnimatedStyle, filter: PhotoFilter, prop: PhotoProp = .none) -> Data? {
+    static func encodeGIF(frames: [Data], style: AnimatedStyle, filter: PhotoFilter, prop: PhotoProp = .none, frameDelay: Double = 0.07) -> Data? {
         guard !frames.isEmpty else { return nil }
 
         var sequence = frames
@@ -65,7 +65,7 @@ enum AnimatedCapture {
         CGImageDestinationSetProperties(destination, gifProperties)
 
         let frameProperties = [
-            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.07]
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: frameDelay]
         ] as CFDictionary
         for image in images {
             CGImageDestinationAddImage(destination, image, frameProperties)

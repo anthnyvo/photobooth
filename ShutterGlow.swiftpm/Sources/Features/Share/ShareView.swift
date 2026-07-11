@@ -73,6 +73,15 @@ struct ShareView: View {
                             showingMail = true
                         }
                     }
+                    // Behind-the-scenes timelapse of the strip session —
+                    // shares as a file URL for the same animation-preserving
+                    // reason as GIF captures.
+                    if let timelapseURL = model.timelapseURL {
+                        ShareLink(item: timelapseURL, preview: SharePreview("Timelapse", image: Image(systemName: "timelapse"))) {
+                            dialFace(label: "Timelapse", systemImage: "timelapse")
+                        }
+                        .buttonStyle(PressableStyle())
+                    }
                     // Print is stills-only — an animated GIF can't print.
                     if model.config.print.enabled && !isGIF {
                         DialButton(label: "Print", systemImage: "printer") {

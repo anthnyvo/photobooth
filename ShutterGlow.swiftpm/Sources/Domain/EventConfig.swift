@@ -179,6 +179,11 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// Offers Boomerang/GIF modes at the attract screen — recorded from the
     /// live-view stream (see AnimatedCapture), not full-res stills.
     public var animationsEnabled: Bool
+    /// Records a behind-the-scenes timelapse of strip sessions — the live
+    /// feed sampled across the whole sequence (countdowns, pose scrambles,
+    /// all of it) into a fast GIF offered alongside the strip. Strips only:
+    /// a single shot has no between-poses story to tell.
+    public var timelapseEnabled: Bool
     public var ai: AIOptions
     /// True for an event mirrored down by RemoteSync from the shared
     /// backend — lets a later sync tell "this event was deleted on the
@@ -201,6 +206,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         squareCrop: Bool = false,
         filtersEnabled: Bool = true,
         animationsEnabled: Bool = true,
+        timelapseEnabled: Bool = false,
         ai: AIOptions = AIOptions(),
         isRemote: Bool = false,
         createdAt: Date = Date()
@@ -218,6 +224,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.squareCrop = squareCrop
         self.filtersEnabled = filtersEnabled
         self.animationsEnabled = animationsEnabled
+        self.timelapseEnabled = timelapseEnabled
         self.ai = ai
         self.isRemote = isRemote
         self.createdAt = createdAt
@@ -236,7 +243,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, ai, isRemote, createdAt
+        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, timelapseEnabled, ai, isRemote, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -254,6 +261,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         squareCrop = try container.decodeIfPresent(Bool.self, forKey: .squareCrop) ?? false
         filtersEnabled = try container.decodeIfPresent(Bool.self, forKey: .filtersEnabled) ?? true
         animationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationsEnabled) ?? true
+        timelapseEnabled = try container.decodeIfPresent(Bool.self, forKey: .timelapseEnabled) ?? false
         ai = try container.decodeIfPresent(AIOptions.self, forKey: .ai) ?? .default
         isRemote = try container.decodeIfPresent(Bool.self, forKey: .isRemote) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
@@ -274,6 +282,7 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(squareCrop, forKey: .squareCrop)
         try container.encode(filtersEnabled, forKey: .filtersEnabled)
         try container.encode(animationsEnabled, forKey: .animationsEnabled)
+        try container.encode(timelapseEnabled, forKey: .timelapseEnabled)
         try container.encode(ai, forKey: .ai)
         try container.encode(isRemote, forKey: .isRemote)
         try container.encode(createdAt, forKey: .createdAt)

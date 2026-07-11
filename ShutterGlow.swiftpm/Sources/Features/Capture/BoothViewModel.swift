@@ -48,6 +48,11 @@ public final class BoothViewModel: ObservableObject {
     /// rendered a few times a second by runLivePropOverlayLoop() and layered
     /// over the live feed for an AR-style preview of the guest's prop pick.
     @Published public private(set) var livePropOverlay: UIImage?
+    /// Behind-the-scenes timelapse of the last strip session — the frantic
+    /// pose scramble between shots, sampled from live view and encoded as a
+    /// fast GIF. Non-nil only after a timelapse-enabled strip completes;
+    /// cleared when the guest's session ends.
+    @Published public private(set) var timelapseURL: URL?
 
     private var transport: PTPIPTransport?
     private var camera: EOSCamera?
@@ -298,6 +303,27 @@ public final class BoothViewModel: ObservableObject {
             return
         }
         let totalShots = sessionShotCount
+
+        // Strip timelapse: sample the live feed ~2x/sec for the WHOLE
+        // sequence — countdowns, the scramble between shots, the flashes —
+        // and encode it after the strip lands. Capped so a stalled sequence
+        // can't grow the buffer unbounded.
+        timelapseURL = nil
+        var timelapseFrames: [Data] = []
+        var timelapseSampler: Task<Void, Never>?
+        if totalShots > 1 && config.timelapseEnabled {
+            timelapseSampler = Task { [weak self] in
+                while !Task.isCancelled {
+                    if let self, let jpeg = self.liveViewImage?.jpegData(compressionQuality: 0.6) {
+                        timelapseFrames.append(jpeg)
+                        if timelapseFrames.count >= 90 { return }
+                    }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+            }
+        }
+        defer { timelapseSampler?.cancel() }
+
         var shots: [Data] = []
         for shotIndex in 1...totalShots {
             stripProgress = totalShots > 1 ? (shotIndex, totalShots) : nil
@@ -313,7 +339,22 @@ public final class BoothViewModel: ObservableObject {
             }
         }
         stripProgress = nil
+        timelapseSampler?.cancel()
         finishCapture(shots: shots)
+
+        // Encode off-main after the strip is on its way — a failed encode
+        // just means no timelapse dial appears, never a failed session.
+        if timelapseFrames.count >= 6 {
+            let frames = timelapseFrames
+            let eventId = config.eventId
+            let gifData = await Task.detached(priority: .utility) {
+                AnimatedCapture.encodeGIF(frames: frames, style: .gif, filter: .none, frameDelay: 0.09)
+            }.value
+            if let gifData,
+               let url = try? EventStorage.shared.savePhoto(gifData, eventId: eventId, fileExtension: "gif") {
+                timelapseURL = url
+            }
+        }
     }
 
     /// Boomerang/GIF path: countdown, then ~2.5s of live-view frames into
@@ -482,6 +523,7 @@ public final class BoothViewModel: ObservableObject {
         selectedFilter = .none
         selectedProp = .none
         livePropOverlay = nil
+        timelapseURL = nil
         step = .attract
     }
 
