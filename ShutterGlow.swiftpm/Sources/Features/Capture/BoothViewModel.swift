@@ -197,6 +197,22 @@ public final class BoothViewModel: ObservableObject {
         lastError = nil
         connectionMessage = "Connecting to \(cameraIPText)…"
 
+        // A re-tap (typo'd IP, impatience) must tear down the previous
+        // attempt first — otherwise the old transport's socket and event
+        // consumer leak and keep feeding stale connection state.
+        eventConsumer?.cancel()
+        eventConsumer = nil
+        liveViewConsumer?.cancel()
+        liveViewConsumer = nil
+        if let staleCamera = camera {
+            camera = nil
+            Task { await staleCamera.disconnect() }
+        }
+        if let staleTransport = transport {
+            transport = nil
+            Task { await staleTransport.disconnect() }
+        }
+
         // Sony speaks HTTP (Camera Remote API), not PTP/IP — no transport
         // handshake to wait on, so it jumps straight to the shared
         // remote-mode + live-view bring-up.
@@ -346,8 +362,20 @@ public final class BoothViewModel: ObservableObject {
     /// originally chose, matching the pre-strip retake semantics of "start
     /// over" 1:1.
     private func beginCountdown() {
-        Task { await captureSequence() }
+        // Re-entry guard. Both triggers race in practice: the smile-shutter
+        // poll can fire in the same beat as the guest's tap (both pass the
+        // .readyToShoot check before the Task below flips step), and Retake
+        // can be double-tapped. Two concurrent captureSequences interleave
+        // countdowns and fire the shutter twice.
+        guard !captureInFlight else { return }
+        captureInFlight = true
+        Task {
+            defer { captureInFlight = false }
+            await captureSequence()
+        }
     }
+
+    private var captureInFlight = false
 
     private func captureSequence() async {
         if let style = sessionAnimatedStyle {
@@ -618,7 +646,14 @@ public final class BoothViewModel: ObservableObject {
     /// the face instead of jittering, and survive brief detection misses.
     private var propSmoother = FaceSmoother()
 
+    /// Three screens (attract, ready-to-shoot, capture) each run the loop
+    /// for their own lifetime, and step-transition crossfades keep two
+    /// alive at once — without this, overlapping refreshes double-scan and
+    /// clobber each other's smoother write-back.
+    private var propScanInFlight = false
+
     private func refreshLivePropOverlay() async {
+        guard !propScanInFlight else { return }
         guard config.ai.props, selectedProp != .none,
               let jpeg = latestLiveFrameJPEG else {
             livePropOverlay = nil
@@ -636,6 +671,8 @@ public final class BoothViewModel: ObservableObject {
 
         let prop = selectedProp
         let smoother = propSmoother
+        propScanInFlight = true
+        defer { propScanInFlight = false }
         let result = await Task.detached(priority: .utility) {
             FacePropRenderer.liveScan(prop, frameData: jpeg, smoother: smoother)
         }.value

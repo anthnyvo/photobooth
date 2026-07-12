@@ -52,8 +52,15 @@ public actor PTPIPTransport: PTPTransport {
     /// polling on the command connection. Phase 1 finding: capture was
     /// timing out waiting for ObjectAdded via GetEvent polling alone;
     /// this connection is what actually carries it.
-    private let objectAddedStream: AsyncStream<UInt32>
-    private let objectAddedContinuation: AsyncStream<UInt32>.Continuation
+    ///
+    /// One-shot waiter, NOT an AsyncStream: an AsyncStream terminates for
+    /// good the moment its consuming task is cancelled or its iterator is
+    /// dropped — which is exactly what racing it against a timeout (or even
+    /// finishing one successful wait) does. With the stream, the first
+    /// capture killed the channel and every capture after it timed out.
+    /// nil resume = timed out / superseded.
+    private var objectAddedWaiter: CheckedContinuation<UInt32?, Never>?
+    private var objectAddedWaiterGeneration = 0
     private var eventReaderTask: Task<Void, Never>?
 
     public init(host: String, port: UInt16 = PTPIPDefaults.port, friendlyName: String = "Photobooth") {
@@ -61,7 +68,6 @@ public actor PTPIPTransport: PTPTransport {
         self.port = port
         self.friendlyName = friendlyName
         (self.events, self.eventContinuation) = AsyncStream<TransportEvent>.makeStream()
-        (self.objectAddedStream, self.objectAddedContinuation) = AsyncStream<UInt32>.makeStream()
     }
 
     private func emit(_ event: TransportEvent) { eventContinuation.yield(event) }
@@ -147,10 +153,24 @@ public actor PTPIPTransport: PTPTransport {
     }
 
     private func publishObjectAdded(_ handle: UInt32) {
-        objectAddedContinuation.yield(handle)
+        if let waiter = objectAddedWaiter {
+            objectAddedWaiter = nil
+            waiter.resume(returning: handle)
+        } else {
+            // A fast body can emit ObjectAdded while the capture command's
+            // own response is still in flight — before the caller has armed
+            // the waiter. Hold it briefly; the freshness window in
+            // nextCapturedFileViaObjectAdded keeps a stale between-captures
+            // notification (card write, etc.) from satisfying a later wait.
+            pendingObjectAdded = (handle, Date())
+        }
     }
 
+    private var pendingObjectAdded: (handle: UInt32, at: Date)?
+
     public func disconnect() {
+        objectAddedWaiter?.resume(returning: nil)
+        objectAddedWaiter = nil
         eventReaderTask?.cancel()
         commandConnection?.cancel()
         eventConnection?.cancel()
@@ -341,20 +361,29 @@ public actor PTPIPTransport: PTPTransport {
     /// keeps its own nextCapturedFile above (host-destined EOS captures
     /// never emit standard ObjectAdded at all).
     public func nextCapturedFileViaObjectAdded(timeout: TimeInterval) async throws -> Data {
-        let handle: UInt32? = await withTaskGroup(of: UInt32?.self) { group in
-            group.addTask { [objectAddedStream] in
-                for await handle in objectAddedStream {
-                    return handle
+        // Supersede any stale waiter (a previous capture that errored out
+        // above this layer), then arm a fresh one. The timeout task only
+        // expires ITS OWN generation, so a slow-but-successful wait can't be
+        // killed by an earlier capture's leftover timer.
+        objectAddedWaiter?.resume(returning: nil)
+        objectAddedWaiter = nil
+        objectAddedWaiterGeneration += 1
+        let generation = objectAddedWaiterGeneration
+
+        let handle: UInt32?
+        if let pending = pendingObjectAdded, Date().timeIntervalSince(pending.at) < 2 {
+            // Event beat us to it (see publishObjectAdded) — consume it.
+            handle = pending.handle
+            pendingObjectAdded = nil
+        } else {
+            pendingObjectAdded = nil
+            handle = await withCheckedContinuation { continuation in
+                objectAddedWaiter = continuation
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    await self?.expireObjectAddedWaiter(generation: generation)
                 }
-                return nil
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
         guard let handle else {
             throw TransportError.timeout("no ObjectAdded event within \(timeout)s of capture")
@@ -366,6 +395,12 @@ public actor PTPIPTransport: PTPTransport {
             throw TransportError.downloadFailed(underlying: nil)
         }
         return objectResult.payload
+    }
+
+    private func expireObjectAddedWaiter(generation: Int) {
+        guard generation == objectAddedWaiterGeneration, let waiter = objectAddedWaiter else { return }
+        objectAddedWaiter = nil
+        waiter.resume(returning: nil)
     }
 
     // MARK: - Networking primitives

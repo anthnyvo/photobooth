@@ -21,7 +21,7 @@ enum PhotoCompositor {
             return photoData
         }
 
-        let renderer = UIGraphicsImageRenderer(size: base.size)
+        let renderer = UIGraphicsImageRenderer(size: base.size, format: .pixelExact)
         let composited = renderer.image { _ in
             base.draw(in: CGRect(origin: .zero, size: base.size))
             overlay.draw(in: CGRect(origin: .zero, size: base.size))
@@ -66,7 +66,7 @@ enum PhotoCompositor {
         let scaledHeights = images.map { $0.size.height * (width / $0.size.width) }
         let totalHeight = scaledHeights.reduce(0, +) + gap * CGFloat(images.count - 1)
 
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: totalHeight))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: totalHeight), format: .pixelExact)
         let composited = renderer.image { context in
             UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: CGSize(width: width, height: totalHeight)))
@@ -90,7 +90,7 @@ enum PhotoCompositor {
         let scaledWidths = images.map { $0.size.width * (height / $0.size.height) }
         let totalWidth = scaledWidths.reduce(0, +) + gap * CGFloat(images.count - 1)
 
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: totalWidth, height: height))
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: totalWidth, height: height), format: .pixelExact)
         let composited = renderer.image { context in
             UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: CGSize(width: totalWidth, height: height)))
@@ -119,7 +119,7 @@ enum PhotoCompositor {
             width: cellWidth * CGFloat(columns) + gap * CGFloat(columns - 1),
             height: cellHeight * CGFloat(rows) + gap * CGFloat(rows - 1)
         )
-        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: .pixelExact)
         let composited = renderer.image { context in
             UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: canvasSize))
@@ -174,7 +174,7 @@ enum PhotoCompositor {
             width: image.size.width + sideBorder * 2,
             height: image.size.height + topBorder + bottomBorder
         )
-        let renderer = UIGraphicsImageRenderer(size: canvasSize)
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: .pixelExact)
         let framed = renderer.image { context in
             UIColor.white.setFill()
             context.fill(CGRect(origin: .zero, size: canvasSize))
@@ -192,7 +192,7 @@ extension UIImage {
         let scale = maxWidth / size.width
         let newSize = CGSize(width: maxWidth, height: size.height * scale)
         return autoreleasepool {
-            UIGraphicsImageRenderer(size: newSize).image { _ in
+            UIGraphicsImageRenderer(size: newSize, format: .pixelExact).image { _ in
                 self.draw(in: CGRect(origin: .zero, size: newSize))
             }
         }
@@ -206,9 +206,21 @@ extension UIImage {
         let scaledSize = CGSize(width: size.width * scale, height: size.height * scale)
         let origin = CGPoint(x: (targetSize.width - scaledSize.width) / 2, y: (targetSize.height - scaledSize.height) / 2)
         return autoreleasepool {
-            UIGraphicsImageRenderer(size: targetSize).image { _ in
+            UIGraphicsImageRenderer(size: targetSize, format: .pixelExact).image { _ in
                 self.draw(in: CGRect(origin: origin, size: scaledSize))
             }
         }
+    }
+}
+
+extension UIGraphicsImageRendererFormat {
+    /// Scale-1 format for print-pipeline rendering. The default format uses
+    /// the device's display scale, so every canvas in this file was quietly
+    /// rendering at 2x its stated size on retina iPads — 4x the memory and
+    /// draw time for print output where the stated size is already plenty.
+    static var pixelExact: UIGraphicsImageRendererFormat {
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return format
     }
 }
