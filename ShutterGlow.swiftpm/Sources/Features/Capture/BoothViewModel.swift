@@ -589,11 +589,16 @@ public final class BoothViewModel: ObservableObject {
     /// exact window the shutter round-trip needs it.
     private var lastPropScannedFrame: Data?
 
+    /// Temporal smoothing state across live prop scans — props glide with
+    /// the face instead of jittering, and survive brief detection misses.
+    private var propSmoother = FaceSmoother()
+
     private func refreshLivePropOverlay() async {
         guard config.ai.props, selectedProp != .none,
               let jpeg = latestLiveFrameJPEG else {
             livePropOverlay = nil
             lastPropScannedFrame = nil
+            propSmoother.reset()
             return
         }
         // The flash/shutter window gets the CPU to itself — the overlay
@@ -605,13 +610,17 @@ public final class BoothViewModel: ObservableObject {
         lastPropScannedFrame = jpeg
 
         let prop = selectedProp
-        let overlay = await Task.detached(priority: .utility) {
-            FacePropRenderer.overlayImage(prop, matching: jpeg)
+        let smoother = propSmoother
+        let result = await Task.detached(priority: .utility) {
+            FacePropRenderer.liveScan(prop, frameData: jpeg, smoother: smoother)
         }.value
+        // The loop awaits each scan before starting the next, so writing
+        // the smoother back can't race a concurrent scan.
+        propSmoother = result.smoother
         // Prop may have changed while the scan ran — drop a stale render
         // rather than flashing the previous prop's shapes.
         guard selectedProp == prop else { return }
-        livePropOverlay = overlay
+        livePropOverlay = result.overlay
     }
 
     // MARK: - Live face analysis (smile shutter / face count)
@@ -631,7 +640,7 @@ public final class BoothViewModel: ObservableObject {
             return LiveFaceReading(faceCount: 0, smiling: false)
         }
         return await Task.detached(priority: .utility) {
-            guard let cgImage = UIImage(data: jpeg)?.cgImage else {
+            guard let cgImage = FaceVision.detectionImage(from: jpeg) else {
                 return LiveFaceReading(faceCount: 0, smiling: false)
             }
             let faces = FaceVision.detectFaces(in: cgImage, accuracy: .live)

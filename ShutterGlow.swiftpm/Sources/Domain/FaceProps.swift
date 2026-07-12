@@ -30,7 +30,7 @@ public enum PhotoProp: String, CaseIterable, Sendable, Identifiable {
 
 /// One face in image pixel coordinates (UIKit orientation, origin
 /// top-left), with the geometry the prop renderer draws against.
-struct DetectedFace {
+struct DetectedFace: Sendable {
     let bounds: CGRect
     let leftEye: CGPoint?
     let rightEye: CGPoint?
@@ -53,9 +53,108 @@ struct DetectedFace {
     }
 }
 
+/// Temporal smoothing for the live prop loop. Raw per-frame detections
+/// jitter by a few pixels and occasionally miss a frame entirely, which
+/// reads as props vibrating and blinking. Exponential smoothing toward each
+/// new sample makes props glide, and a short grace window holds the last
+/// good faces through detection misses so the overlay never flickers.
+/// Coordinates are only comparable across scans of the same pixel space —
+/// the caller resets the smoother whenever the frame size changes.
+struct FaceSmoother: Sendable {
+    var pixelSize: CGSize = .zero
+    private var faces: [DetectedFace] = []
+    private var misses = 0
+
+    /// Weight of the newest sample. At ~11 scans/sec, 0.45 settles on a new
+    /// position within ~3 frames — smooth without visible lag.
+    private static let alpha: CGFloat = 0.45
+    /// Consecutive empty detections tolerated before the overlay drops.
+    private static let maxMisses = 3
+
+    mutating func update(with detected: [DetectedFace]) -> [DetectedFace] {
+        guard !detected.isEmpty else {
+            misses += 1
+            if misses > Self.maxMisses { faces = [] }
+            return faces
+        }
+        misses = 0
+        var previous = faces
+        faces = detected.map { raw in
+            // Nearest prior face within one face-width = same person.
+            if let index = previous.indices.min(by: {
+                Self.distance(previous[$0], raw) < Self.distance(previous[$1], raw)
+            }), Self.distance(previous[index], raw) < raw.bounds.width {
+                return Self.smooth(old: previous.remove(at: index), new: raw)
+            }
+            return raw
+        }
+        return faces
+    }
+
+    mutating func reset() {
+        faces = []
+        misses = 0
+        pixelSize = .zero
+    }
+
+    private static func distance(_ a: DetectedFace, _ b: DetectedFace) -> CGFloat {
+        hypot(a.eyeCenter.x - b.eyeCenter.x, a.eyeCenter.y - b.eyeCenter.y)
+    }
+
+    private static func smooth(old: DetectedFace, new: DetectedFace) -> DetectedFace {
+        func lerp(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * alpha }
+        func lerp(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
+            CGPoint(x: lerp(a.x, b.x), y: lerp(a.y, b.y))
+        }
+        func lerp(_ a: CGPoint?, _ b: CGPoint?) -> CGPoint? {
+            guard let a, let b else { return b ?? a }
+            return lerp(a, b)
+        }
+        return DetectedFace(
+            bounds: CGRect(
+                x: lerp(old.bounds.origin.x, new.bounds.origin.x),
+                y: lerp(old.bounds.origin.y, new.bounds.origin.y),
+                width: lerp(old.bounds.width, new.bounds.width),
+                height: lerp(old.bounds.height, new.bounds.height)
+            ),
+            leftEye: lerp(old.leftEye, new.leftEye),
+            rightEye: lerp(old.rightEye, new.rightEye),
+            mouth: lerp(old.mouth, new.mouth),
+            roll: lerp(old.roll, new.roll),
+            hasSmile: new.hasSmile
+        )
+    }
+}
+
 enum FaceVision {
     enum Accuracy {
         case still, live
+    }
+
+    /// Decodes a live-view JPEG down to detection resolution. Vision's
+    /// landmark accuracy holds well below full live-view size while its
+    /// cost scales with pixel area, so scanning at ≤1024px instead of the
+    /// raw frame cuts each pass to a fraction — this, not scan frequency,
+    /// was the real cost of the live loop. Rendered at scale 1 so pixel
+    /// dimensions are exact and stable across frames (the smoother
+    /// compares coordinates between scans).
+    static func detectionImage(from data: Data, maxWidth: CGFloat = 1024) -> CGImage? {
+        guard let image = UIImage(data: data) else { return nil }
+        guard let cgImage = image.cgImage else { return nil }
+        guard CGFloat(cgImage.width) > maxWidth else { return cgImage }
+
+        let target = CGSize(
+            width: maxWidth,
+            height: (maxWidth * CGFloat(cgImage.height) / CGFloat(cgImage.width)).rounded()
+        )
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let small = autoreleasepool {
+            UIGraphicsImageRenderer(size: target, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: target))
+            }
+        }
+        return small.cgImage
     }
 
     /// Vision landmark detection in UIKit pixel coordinates. Same code for
@@ -165,26 +264,41 @@ enum FacePropRenderer {
         return rendered.jpegData(compressionQuality: 0.92) ?? photoData
     }
 
-    /// Props-only render on a transparent canvas, sized to the frame's
-    /// pixels — the live-view AR preview layer.
-    static func overlayImage(_ prop: PhotoProp, matching frameData: Data) -> UIImage? {
+    /// One live-loop pass: detect at reduced resolution, smooth against the
+    /// previous scans, render props-only on a transparent canvas matching
+    /// the detection frame's aspect (the preview layers it `scaledToFill`,
+    /// so only aspect matters, and rendering small is cheaper too).
+    /// Value-in/value-out smoother keeps this callable from a detached
+    /// task with no shared state.
+    static func liveScan(
+        _ prop: PhotoProp,
+        frameData: Data,
+        smoother: FaceSmoother
+    ) -> (overlay: UIImage?, smoother: FaceSmoother) {
+        var smoother = smoother
         guard prop != .none,
-              let image = UIImage(data: frameData),
-              let cgImage = image.cgImage else { return nil }
-
-        let faces = FaceVision.detectFaces(in: cgImage, accuracy: .live)
-        guard !faces.isEmpty else { return nil }
-
+              let cgImage = FaceVision.detectionImage(from: frameData) else {
+            smoother.reset()
+            return (nil, smoother)
+        }
         let pixelSize = CGSize(width: cgImage.width, height: cgImage.height)
+        if pixelSize != smoother.pixelSize {
+            smoother.reset()
+            smoother.pixelSize = pixelSize
+        }
+        let faces = smoother.update(with: FaceVision.detectFaces(in: cgImage, accuracy: .live))
+        guard !faces.isEmpty else { return (nil, smoother) }
+
         let format = UIGraphicsImageRendererFormat.default()
         format.scale = 1
         format.opaque = false
-        return UIGraphicsImageRenderer(size: pixelSize, format: format).image { context in
+        let overlay = UIGraphicsImageRenderer(size: pixelSize, format: format).image { context in
             let cg = context.cgContext
             for face in faces {
                 draw(prop, on: face, in: cg)
             }
         }
+        return (overlay, smoother)
     }
 
     /// All props draw in FACE-LOCAL space: the context is translated to the

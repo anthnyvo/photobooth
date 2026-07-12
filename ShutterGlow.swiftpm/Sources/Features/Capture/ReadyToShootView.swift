@@ -93,10 +93,16 @@ struct ReadyToShootView: View {
             // tapping a mode doesn't trigger the countdown instantly.
             guard smileShutterOn else { return }
             try? await Task.sleep(nanoseconds: 900_000_000)
+            // Two consecutive smiling reads before firing — the lip-geometry
+            // smile test can false-positive on a single frame (talking,
+            // mid-expression), and a surprise shutter is worse than a ~half
+            // second of extra grin.
+            var smilingStreak = 0
             while !Task.isCancelled {
                 let reading = await model.analyzeLiveViewFaces()
                 faceCount = reading.faceCount
-                if reading.smiling {
+                smilingStreak = reading.smiling ? smilingStreak + 1 : 0
+                if smilingStreak >= 2 {
                     model.confirmReadyToShoot()
                     return
                 }
