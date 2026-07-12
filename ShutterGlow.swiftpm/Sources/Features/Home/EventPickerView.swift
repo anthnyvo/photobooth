@@ -185,9 +185,14 @@ private struct EventCard: View {
             Image(systemName: "chevron.right")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Chassis.textSecondary)
+                .accessibilityHidden(true)
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .chassisPanel(cornerRadius: 24)
+        // Without this, VoiceOver read the monogram initials, the name,
+        // the id, and "SYNCED" as separate stops on one tappable row —
+        // combining reads it as one coherent element instead.
+        .accessibilityElement(children: .combine)
     }
 }

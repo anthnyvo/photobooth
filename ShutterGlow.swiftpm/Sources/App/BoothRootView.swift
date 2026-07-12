@@ -65,6 +65,18 @@ struct BoothRootView: View {
                 SpikeView()
             }
         }
+        // Bounds Dynamic Type for the semantic text styles already used in
+        // a handful of places (.callout, .headline, etc.) to the standard
+        // range, excluding the OS's five largest accessibility sizes
+        // (AX1-AX5) that would break this kiosk's fixed layouts outright.
+        // Most of the app's text uses hardcoded `.font(.system(size: N))`
+        // rather than a semantic style, which this modifier does NOT make
+        // scale — that would need per-screen work (ScaledMetric or
+        // switching to semantic styles) across every guest-facing view,
+        // which isn't something to do as a blind, unverified sweep on a
+        // kiosk layout with no simulator/Mac to check the result against.
+        // Real, bounded win for what's already scalable; not a full pass.
+        .dynamicTypeSize(.xSmall ... .xxxLarge)
     }
 }
 

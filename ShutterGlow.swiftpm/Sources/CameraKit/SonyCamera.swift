@@ -71,28 +71,34 @@ public actor SonyCamera: TetheredCamera {
         return stream
     }
 
+    private var chunkedReader: ChunkedHTTPStream?
+
+    /// Sony's stream runs at several fps of continuous JPEG data — the
+    /// previous `for try await byte in bytes` drove Swift's AsyncSequence
+    /// machinery (and a single-byte Data.append call) once PER BYTE, real
+    /// overhead on a hot path with no built-in "read in chunks" option on
+    /// URLSession's async-bytes API. A URLSessionDataDelegate instead
+    /// receives whole network chunks (tens of KB) per callback — the
+    /// parser below is unchanged; only how bytes arrive into its buffer is
+    /// different.
     private func startLiveviewReader(url: URL) {
         liveViewTask?.cancel()
-        liveViewTask = Task { [weak self, session] in
-            do {
-                let (bytes, _) = try await session.bytes(from: url)
-                var buffer = Data()
-                for try await byte in bytes {
-                    if Task.isCancelled { return }
-                    buffer.append(byte)
-                    // Parse complete frames off the front of the buffer.
-                    while let (jpeg, consumed) = SonyLiveviewParser.nextFrame(in: buffer) {
-                        if let jpeg {
-                            await self?.yieldFrame(jpeg)
-                        }
-                        buffer.removeFirst(consumed)
+        let reader = ChunkedHTTPStream()
+        chunkedReader = reader
+        let chunks = reader.start(url: url)
+        liveViewTask = Task { [weak self] in
+            var buffer = Data()
+            for await chunk in chunks {
+                if Task.isCancelled { break }
+                buffer.append(chunk)
+                while let (jpeg, consumed) = SonyLiveviewParser.nextFrame(in: buffer) {
+                    if let jpeg {
+                        await self?.yieldFrame(jpeg)
                     }
-                    // Runaway guard — a corrupt stream must not grow forever.
-                    if buffer.count > 4_000_000 { buffer.removeAll(keepingCapacity: true) }
+                    buffer.removeFirst(consumed)
                 }
-            } catch {
-                // Stream dropped — surface as a finished feed; the booth
-                // shows its no-feed state rather than crashing the flow.
+                // Runaway guard — a corrupt stream must not grow forever.
+                if buffer.count > 4_000_000 { buffer.removeAll(keepingCapacity: true) }
             }
             await self?.finishLiveview()
         }
@@ -143,6 +149,8 @@ public actor SonyCamera: TetheredCamera {
 
     public func disconnect() {
         liveViewTask?.cancel()
+        chunkedReader?.cancel()
+        chunkedReader = nil
         liveViewContinuation?.finish()
         liveViewContinuation = nil
         Task { _ = try? await call("stopRecMode") }
@@ -168,6 +176,53 @@ public actor SonyCamera: TetheredCamera {
             throw SonyCameraError.apiError(method: method, code: code)
         }
         return json["result"] as? [Any] ?? []
+    }
+}
+
+/// Bridges a long-lived streaming HTTP GET into an `AsyncStream<Data>` of
+/// network-sized chunks, using `URLSessionDataDelegate` (callback-based,
+/// whole-chunk `didReceive data:`) instead of `URLSession.bytes(from:)`'s
+/// per-byte AsyncSequence — see startLiveviewReader's doc comment for why.
+/// `@unchecked Sendable`: NSObject/delegate callbacks aren't actor-isolated,
+/// but every mutable property here is only ever touched from those
+/// callbacks (URLSession's own internal delegate queue), which serializes
+/// them for us.
+private final class ChunkedHTTPStream: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private var continuation: AsyncStream<Data>.Continuation?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+
+    func start(url: URL) -> AsyncStream<Data> {
+        let config = URLSessionConfiguration.ephemeral
+        // No request timeout — this is a long-lived streaming connection,
+        // not a single request/response; a fixed timeout would cut the
+        // live feed off mid-session.
+        config.timeoutIntervalForRequest = .infinity
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        self.session = session
+
+        let (stream, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .unbounded)
+        self.continuation = continuation
+        let task = session.dataTask(with: url)
+        self.task = task
+        task.resume()
+        return stream
+    }
+
+    func cancel() {
+        task?.cancel()
+        session?.invalidateAndCancel()
+        continuation?.finish()
+        continuation = nil
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        continuation?.yield(data)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        continuation?.finish()
+        continuation = nil
     }
 }
 

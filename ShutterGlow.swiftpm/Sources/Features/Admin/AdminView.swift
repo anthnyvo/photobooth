@@ -310,6 +310,7 @@ struct AdminView: View {
                     .overlay(Circle().strokeBorder(Chassis.hairline, lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close")
 
             Text(mode == .create ? "New Event" : "Event Setup")
                 .font(.system(size: 26, weight: .bold))
@@ -609,6 +610,7 @@ private struct GlassStepper: View {
             .buttonStyle(.plain)
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.35)
+            .accessibilityLabel(symbol == "plus" ? "Increase" : "Decrease")
         }
     }
 }
