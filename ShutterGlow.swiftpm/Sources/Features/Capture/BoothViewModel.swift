@@ -218,7 +218,11 @@ public final class BoothViewModel: ObservableObject {
         // remote-mode + live-view bring-up.
         if selectedBrand == .sony {
             transport = nil
-            let cam = SonyCamera(host: cameraIPText)
+            guard let cam = SonyCamera(host: cameraIPText) else {
+                lastError = "Couldn't connect — check the camera's IP address"
+                connectionMessage = "Enter the camera's IP and connect"
+                return
+            }
             camera = cam
             Task {
                 await startRemoteModeAndLiveView()
@@ -507,7 +511,15 @@ public final class BoothViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
 
-        guard let camera else { return nil }
+        guard let camera else {
+            // Every other early-return in this function sets lastError and
+            // moves off the countdown/capturing step; this one didn't,
+            // which left step stuck wherever the countdown loop above left
+            // it (e.g. .countdown(1)) with nothing to recover it.
+            lastError = "No camera connected"
+            step = .connecting
+            return nil
+        }
         step = .capturing
         do {
             // The underlying NWConnection reads inside capturePhoto() have no
@@ -601,11 +613,18 @@ public final class BoothViewModel: ObservableObject {
     }
 
     public func retake() {
+        // ReviewView's own auto-return timer (scheduled when it appeared)
+        // is still ticking — a strip retake's countdown+capture+timelapse
+        // sequence can run past its 20s window, and without this the timer
+        // would fire mid-sequence and force step back to .attract while a
+        // capture is in flight.
+        returnToAttractTask?.cancel()
         beginCountdown()
     }
 
     public func accept() {
         guard case .review(let url) = step else { return }
+        returnToAttractTask?.cancel()
         step = .sharing(url)
     }
 

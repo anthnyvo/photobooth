@@ -22,12 +22,25 @@ final class PrintJob: ObservableObject {
         printInfo.outputType = .photo
         printInfo.jobName = "Photobooth print"
 
+        // present(animated:completionHandler:) is iPhone-only — on iPad,
+        // UIPrintInteractionController requires the popover-anchored
+        // present(from:in:animated:completionHandler:) or it's a documented
+        // crash (missing popover source). This app only ships to iPad, so
+        // every guest tapping Print was hitting that crash. Anchored at the
+        // key window's bottom-center as a sane default since the call site
+        // doesn't have the tapped button's exact frame.
+        guard let window = Self.keyWindow else {
+            statusMessage = "Couldn't open the print dialog"
+            return
+        }
+        let anchor = CGRect(x: window.bounds.midX - 1, y: window.bounds.maxY - 1, width: 2, height: 2)
+
         let controller = UIPrintInteractionController.shared
         controller.printInfo = printInfo
         controller.printingItem = image
 
         statusMessage = "Sending to printer…"
-        controller.present(animated: true) { [weak self] _, completed, error in
+        let started = controller.present(from: anchor, in: window, animated: true) { [weak self] _, completed, error in
             Task { @MainActor in
                 if completed {
                     self?.statusMessage = "Sent to printer"
@@ -38,5 +51,15 @@ final class PrintJob: ObservableObject {
                 }
             }
         }
+        if !started {
+            statusMessage = "Couldn't open the print dialog"
+        }
+    }
+
+    private static var keyWindow: UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
     }
 }

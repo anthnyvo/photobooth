@@ -323,6 +323,22 @@ public actor EOSCamera {
         try await expectOK("ReleaseOn(half)",
             await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
 
+        // From here on the half-press is ENGAGED on the body. Any throw
+        // below this point — including the full-press send() itself
+        // throwing on a network error, not just a bad response code, which
+        // the explicit release at line ~353 never covered — must still
+        // release it, or the body refuses every future press (remote or
+        // physical) with DeviceBusy until power-cycled. halfPressReleased
+        // tracks whether a path below already handled it explicitly, so
+        // this defer doesn't double-send on the normal exit.
+        var halfPressReleased = false
+        defer {
+            if !halfPressReleased {
+                let transport = self.transport
+                Task { _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1]) }
+            }
+        }
+
         // FocusMode==3 means manual focus, in which case libgphoto2 never
         // waits for AF confirmation at all — worth knowing which mode we're
         // actually in rather than relying on what a physical switch looked
@@ -351,6 +367,7 @@ public actor EOSCamera {
         let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 1])
         if let code = fullPress.response?.code, code != PTPResponseCode.ok {
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
+            halfPressReleased = true
             log(String(format: "ReleaseOn(full) failed: 0x%04X — half-press released", code))
             throw EOSError.badResponse(operation: "ReleaseOn(full)", code: code)
         }
@@ -359,6 +376,7 @@ public actor EOSCamera {
             await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2]))
         try await expectOK("ReleaseOff(half)",
             await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1]))
+        halfPressReleased = true
         log("shutter via ReleaseOn/Off half+full pair")
     }
 

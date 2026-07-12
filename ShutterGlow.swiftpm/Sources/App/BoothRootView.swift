@@ -57,7 +57,13 @@ struct BoothRootView: View {
         }
         .statusBarHidden()
         .fullScreenCover(isPresented: $showDiagnostics) {
-            SpikeView()
+            // Was reachable by any guest with a 2-second long-press and no
+            // PIN — SpikeView's independent camera controls could collide
+            // with the live booth session, and (before the dismiss button
+            // added alongside this) there was no way back out at all.
+            PINGate {
+                SpikeView()
+            }
         }
     }
 }

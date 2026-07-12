@@ -3,12 +3,14 @@ import SwiftUI
 struct SpikeView: View {
     @StateObject private var model = SpikeViewModel()
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         // iPad: capture left, log right. iPhone (compact): log below.
         let layout = sizeClass == .compact
             ? AnyLayout(VStackLayout(spacing: 0))
             : AnyLayout(HStackLayout(spacing: 0))
+        ZStack(alignment: .topLeading) {
         layout {
             // Live view + capture
             VStack(spacing: 12) {
@@ -112,6 +114,20 @@ struct SpikeView: View {
             .frame(maxWidth: sizeClass == .compact ? .infinity : 380,
                    maxHeight: sizeClass == .compact ? 260 : .infinity)
             .background(Color(.secondarySystemBackground))
+        }
+        // This screen has its own independent camera connect/capture
+        // controls, separate from the live booth session — previously had
+        // no way back out at all once opened (PIN-gated now, see
+        // BoothRootView), which stranded the kiosk until an attendant
+        // force-quit the app and dropped the camera connection.
+        Button(action: { dismiss() }) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+                .background(Circle().fill(Color(.systemBackground)))
+        }
+        .accessibilityLabel("Close diagnostics")
+        .padding(12)
         }
     }
 

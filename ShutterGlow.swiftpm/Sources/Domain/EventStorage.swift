@@ -17,7 +17,24 @@ public final class EventStorage {
     private init() {}
 
     public func eventDirectory(_ eventId: String) -> URL {
-        eventsRoot.appendingPathComponent(eventId, isDirectory: true)
+        eventsRoot.appendingPathComponent(Self.sanitizeEventId(eventId), isDirectory: true)
+    }
+
+    /// eventId is free-text the attendant types into AdminView (only a "no
+    /// spaces" hint, nothing enforced) and every path in this file is built
+    /// by appending it as a single filesystem path component. Unsanitized,
+    /// a value like "../../SomeOtherEvent" would let create/save/delete
+    /// write or delete files outside the intended Events/<eventId>/ tree —
+    /// still inside the app sandbox, but silently corrupting or destroying
+    /// another event's data. Applied here (not just at entry in AdminView)
+    /// so every path in this file is safe regardless of caller. Idempotent:
+    /// sanitizing an already-clean id is a no-op, so re-deriving paths from
+    /// a value that passed through this once (e.g. listEventIds() results)
+    /// still resolves to the same directory.
+    public static func sanitizeEventId(_ eventId: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        let cleaned = String(eventId.unicodeScalars.filter { allowed.contains($0) })
+        return cleaned.isEmpty ? "event" : cleaned
     }
 
     public func assetsDirectory(_ eventId: String) -> URL {

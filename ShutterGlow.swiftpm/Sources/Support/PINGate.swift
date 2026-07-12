@@ -1,11 +1,24 @@
 import SwiftUI
 
+/// Attendant PIN storage — not generic-parameterized like PINGate itself so
+/// AdminView's Security section can read/write it without a dummy Content
+/// type. Every ShutterGlow install shipped with the same fixed "1234",
+/// never written anywhere, with no way to change it; AdminView's Security
+/// section now writes a real PIN here on first use. "1234" stays the
+/// fallback for installs that haven't set one yet.
+enum AdminPIN {
+    static var current: String {
+        UserDefaults.standard.string(forKey: "com.anthonyvo.photobooth.adminPIN") ?? "1234"
+    }
+
+    static func set(_ pin: String) {
+        UserDefaults.standard.set(pin, forKey: "com.anthonyvo.photobooth.adminPIN")
+    }
+}
+
 /// Gates a view behind a 4-digit PIN. Not meant as real security — just
 /// keeps guests from wandering into settings/admin screens.
 struct PINGate<Content: View>: View {
-    private static var storedPIN: String {
-        UserDefaults.standard.string(forKey: "com.anthonyvo.photobooth.adminPIN") ?? "1234"
-    }
 
     @State private var entered = ""
     @State private var unlocked = false
@@ -71,7 +84,7 @@ struct PINGate<Content: View>: View {
     }
 
     private func check() {
-        if entered == Self.storedPIN {
+        if entered == AdminPIN.current {
             unlocked = true
         } else {
             showError = true

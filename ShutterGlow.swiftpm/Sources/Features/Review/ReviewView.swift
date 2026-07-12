@@ -64,6 +64,14 @@ struct ReviewView: View {
         .sensoryFeedback(.success, trigger: developed)
         .onAppear {
             withAnimation { developed = true }
+            // Every other step in the flow (ReadyToShoot, Share) schedules
+            // an auto-return — this one didn't, so a guest who glances at
+            // their photo and walks off without tapping Retake/Use Photo
+            // left the booth parked here indefinitely, blocking every
+            // guest after them. The photo itself is already saved to disk
+            // regardless (finishCapture wrote it before this screen ever
+            // appeared), so resetting to attract loses nothing.
+            model.scheduleAutoReturn(after: 20)
         }
     }
 }

@@ -4,12 +4,14 @@ public enum SonyCameraError: Error, LocalizedError {
     case apiError(method: String, code: Int)
     case badLiveviewStream
     case noPostviewURL
+    case invalidHost(String)
 
     public var errorDescription: String? {
         switch self {
         case .apiError(let method, let code): "Sony API \(method) failed (code \(code))"
         case .badLiveviewStream: "Sony liveview stream ended unexpectedly"
         case .noPostviewURL: "Sony camera returned no image URL after capture"
+        case .invalidHost(let host): "Couldn't build a camera URL from '\(host)'"
         }
     }
 }
@@ -34,8 +36,13 @@ public actor SonyCamera: TetheredCamera {
     private var liveViewTask: Task<Void, Never>?
     private var liveViewContinuation: AsyncStream<Data>.Continuation?
 
-    public init(host: String) {
-        endpoint = URL(string: "http://\(host):8080/sony/camera")!
+    /// Fails rather than force-unwrapping when `host` can't form a valid
+    /// URL — notably IPv6 link-local addresses with a zone ID (e.g.
+    /// `fe80::1%en0`, which iOS network APIs can hand back) aren't valid
+    /// inside a bare URL string, and `URL(string:)` returns nil for them.
+    public init?(host: String) {
+        guard let url = URL(string: "http://\(host):8080/sony/camera") else { return nil }
+        endpoint = url
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 12
         session = URLSession(configuration: config)

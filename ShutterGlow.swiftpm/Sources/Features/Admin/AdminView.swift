@@ -54,6 +54,9 @@ struct AdminView: View {
     @State private var saveMessage: String?
     @State private var showingDeleteConfirm = false
     @State private var showingExport = false
+    @State private var currentPINEntry = ""
+    @State private var newPINEntry = ""
+    @State private var pinMessage: String?
 
     var body: some View {
         ZStack {
@@ -190,6 +193,41 @@ struct AdminView: View {
                             GlassToggle(title: "Limit prints per guest", isOn: $limitPrints)
                             if limitPrints {
                                 GlassStepper(label: "Limit", value: $printLimitCount, range: 1...10)
+                            }
+                        }
+                    }
+
+                    // Not scoped to an event — the attendant PIN is
+                    // install-wide, so this shows in both create and edit
+                    // mode. Every install shipped with the same fixed
+                    // "1234" and no way to change it; this is that way.
+                    SetupCard(title: "Security") {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("Attendant PIN")
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Chassis.textPrimary)
+                            HStack(spacing: 12) {
+                                SecureField("Current", text: $currentPINEntry)
+                                    .keyboardType(.numberPad)
+                                SecureField("New (4 digits)", text: $newPINEntry)
+                                    .keyboardType(.numberPad)
+                            }
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 15, design: .monospaced))
+                            .foregroundStyle(Chassis.textPrimary)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 14)
+                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Chassis.control))
+
+                            Button("Update PIN", action: changePIN)
+                                .buttonStyle(.plain)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Chassis.accent)
+
+                            if let pinMessage {
+                                Text(pinMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(pinMessage.hasPrefix("Updated") ? Chassis.accent : .red)
                             }
                         }
                     }
@@ -359,7 +397,28 @@ struct AdminView: View {
         timelapseEnabled = current.timelapseEnabled
     }
 
+    private func changePIN() {
+        guard currentPINEntry == AdminPIN.current else {
+            pinMessage = "Current PIN is wrong"
+            return
+        }
+        guard newPINEntry.count == 4, newPINEntry.allSatisfy(\.isNumber) else {
+            pinMessage = "New PIN must be 4 digits"
+            return
+        }
+        AdminPIN.set(newPINEntry)
+        currentPINEntry = ""
+        newPINEntry = ""
+        pinMessage = "Updated"
+    }
+
     private func save() {
+        // Normalized before it ever reaches EventStorage, so the id shown
+        // in the UI (event picker rows, status panel) matches the actual
+        // on-disk folder name EventStorage.eventDirectory() derives from
+        // it — that function also sanitizes defensively, but doing it here
+        // too avoids a raw-vs-sanitized display mismatch for a new event.
+        eventId = EventStorage.sanitizeEventId(eventId)
         var config = EventConfig(
             eventId: eventId,
             displayName: displayName,

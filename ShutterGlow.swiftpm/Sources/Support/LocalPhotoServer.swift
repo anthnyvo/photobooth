@@ -21,6 +21,15 @@ public actor LocalPhotoServer {
 
     private var listener: NWListener?
 
+    /// Random per-photo token -> file, minted only when a guest actually
+    /// requests a share URL. Filenames alone were predictable timestamps
+    /// (IMG_<millisecond-epoch>.jpg) served with no access control — any
+    /// device on the venue Wi-Fi, not just the guest who scanned the QR
+    /// code, could enumerate nearby timestamps and pull down other guests'
+    /// photos. The URL now carries an unguessable token instead of the
+    /// real filename, and the server only ever serves tokens it minted.
+    private var tokens: [String: URL] = [:]
+
     private init() {}
 
     public func start() throws {
@@ -42,12 +51,15 @@ public actor LocalPhotoServer {
     }
 
     /// URL a guest's phone can reach this photo at — nil if we don't have a
-    /// Wi-Fi IPv4 address (e.g. not actually joined to a network).
+    /// Wi-Fi IPv4 address (e.g. not actually joined to a network). Mints a
+    /// fresh random token for this photo each call rather than exposing its
+    /// real filename.
     public func url(forPhoto photoURL: URL) -> URL? {
         guard let ip = NetworkInfo.wifiIPv4Address() else { return nil }
-        let filename = photoURL.lastPathComponent
-            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? photoURL.lastPathComponent
-        return URL(string: "http://\(ip):\(Self.port)/photos/\(filename)")
+        let token = (0..<24).map { _ in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".randomElement()! }
+        let tokenString = String(token)
+        tokens[tokenString] = photoURL
+        return URL(string: "http://\(ip):\(Self.port)/photos/\(tokenString)")
     }
 
     private func handle(_ connection: NWConnection) async {
@@ -107,13 +119,12 @@ public actor LocalPhotoServer {
 
     private func resolvePhotoPath(_ path: String) -> URL? {
         guard path.hasPrefix("/photos/") else { return nil }
-        let filename = String(path.dropFirst("/photos/".count))
-        // Reject traversal — this server only ever serves flat filenames
-        // out of the current event's own photos directory.
-        guard !filename.contains("/"), !filename.contains(".."), let eventId = EventStorage.shared.currentEventId() else {
-            return nil
-        }
-        return EventStorage.shared.photosDirectory(eventId).appendingPathComponent(filename)
+        let token = String(path.dropFirst("/photos/".count))
+        // Only ever serves a token this server itself minted via
+        // url(forPhoto:) — no path traversal surface at all, since the
+        // request never supplies a filename or path, just an opaque token
+        // looked up against server-side state.
+        return tokens[token]
     }
 
     private func respond(_ connection: NWConnection, status: String, body: Data, contentType: String = "text/plain") async {

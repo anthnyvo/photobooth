@@ -50,9 +50,17 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         }
     }()
 
-    /// Files ImageCaptureCore surfaces after a capture, keyed by name.
-    private var pendingFiles: [String: ICCameraFile] = [:]
-    private var fileWaiters: [(CheckedContinuation<ICCameraFile, Error>)] = []
+    /// Single-slot waiter design (not a FIFO queue): only one capture is
+    /// ever in flight, so a FIFO here just misattributes files across
+    /// captures. A timed-out capture whose file-added event arrives late
+    /// used to hand that stale file to the NEXT capture (silently wrong
+    /// photo), or — if the waiter rather than the file was what timed out —
+    /// leave every later capture's waiter permanently queued behind an
+    /// abandoned one (permanent stall). generation guards a captured file
+    /// arriving right as a new wait is being armed.
+    private var pendingFile: (file: ICCameraFile, at: Date)?
+    private var currentWaiter: (continuation: CheckedContinuation<ICCameraFile, Error>, generation: Int)?
+    private var waiterGeneration = 0
 
     public override init() {
         super.init()
@@ -107,26 +115,7 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     /// then read its bytes. Spike strategy: let ICC do object transfer rather
     /// than hand-rolling GetPartialObject — revisit in Phase 1 if too slow.
     public func nextCapturedFile(timeout: TimeInterval = 15) async throws -> Data {
-        let file: ICCameraFile = try await withThrowingTaskGroup(of: ICCameraFile.self) { group in
-            group.addTask {
-                try await withCheckedThrowingContinuation { continuation in
-                    DispatchQueue.main.async {
-                        if let (_, existing) = self.pendingFiles.popFirst() {
-                            continuation.resume(returning: existing)
-                        } else {
-                            self.fileWaiters.append(continuation)
-                        }
-                    }
-                }
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                throw TransportError.timeout("no file announced within \(timeout)s of capture")
-            }
-            let result = try await group.next()!
-            group.cancelAll()
-            return result
-        }
+        let file = try await waitForCapturedFile(timeout: timeout)
 
         return try await withCheckedThrowingContinuation { continuation in
             let size = Int(truncatingIfNeeded: file.fileSize)
@@ -141,6 +130,41 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     }
 
     // MARK: - Internals
+
+    /// All mutation of pendingFile/currentWaiter/waiterGeneration happens on
+    /// the main queue, matching where ICDeviceBrowserDelegate callbacks
+    /// land (this class predates Swift concurrency and isn't an actor).
+    private func waitForCapturedFile(timeout: TimeInterval) async throws -> ICCameraFile {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.main.async {
+                // Supersede any stale waiter (a previous capture that
+                // errored above this layer without ever resolving it).
+                self.currentWaiter?.continuation.resume(throwing: TransportError.timeout("superseded by a new capture"))
+                self.currentWaiter = nil
+                self.waiterGeneration += 1
+                let generation = self.waiterGeneration
+
+                if let pending = self.pendingFile, Date().timeIntervalSince(pending.at) < 2 {
+                    self.pendingFile = nil
+                    continuation.resume(returning: pending.file)
+                    return
+                }
+                self.pendingFile = nil
+                self.currentWaiter = (continuation, generation)
+
+                Task {
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    DispatchQueue.main.async { self.expireWaiter(generation: generation) }
+                }
+            }
+        }
+    }
+
+    private func expireWaiter(generation: Int) {
+        guard generation == waiterGeneration, let waiter = currentWaiter else { return }
+        currentWaiter = nil
+        waiter.continuation.resume(throwing: TransportError.timeout("no file announced within timeout of capture"))
+    }
 
     private func emit(_ event: TransportEvent) {
         eventContinuation?.yield(event)
@@ -191,11 +215,11 @@ extension ICCTransport: ICCameraDeviceDelegate {
             guard let file = item as? ICCameraFile else { continue }
             emit(.fileAdded(name: file.name ?? "?", sizeBytes: Int(truncatingIfNeeded: file.fileSize)))
             DispatchQueue.main.async {
-                if let waiter = self.fileWaiters.first {
-                    self.fileWaiters.removeFirst()
-                    waiter.resume(returning: file)
+                if let waiter = self.currentWaiter {
+                    self.currentWaiter = nil
+                    waiter.continuation.resume(returning: file)
                 } else {
-                    self.pendingFiles[file.name ?? UUID().uuidString] = file
+                    self.pendingFile = (file, Date())
                 }
             }
         }

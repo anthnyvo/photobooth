@@ -217,6 +217,7 @@ struct BackButton: View {
                 .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
         }
         .buttonStyle(PressableStyle())
+        .accessibilityLabel("Back")
     }
 }
 

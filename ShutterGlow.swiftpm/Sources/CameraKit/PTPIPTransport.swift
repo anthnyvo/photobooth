@@ -220,8 +220,16 @@ public actor PTPIPTransport: PTPTransport {
 
             try await self.enterExclusive(context)
             do {
+                // Data-Phase-Info per the PTP/IP spec: 1 = data-in (camera
+                // → host), 2 = data-out (host → camera). Previously hardcoded
+                // to 1 regardless of direction — masked because Canon bodies
+                // tolerate it on SetDevicePropValueEx (the only data-out
+                // opcode this app sends today), but a stricter body, or any
+                // future data-out opcode on the beta Nikon/generic paths,
+                // could reject the operation outright on a wrong direction.
+                let dataPhase: UInt32 = hasDataPhase ? (outData != nil ? 2 : 1) : 0
                 let reqPayload = PTPIPCodec.operationRequestPayload(
-                    dataPhase: hasDataPhase ? 1 : 0, opcode: code, transactionID: txn, parameters: parameters)
+                    dataPhase: dataPhase, opcode: code, transactionID: txn, parameters: parameters)
                 try await self.write(PTPIPPacket(type: .operationRequest, payload: reqPayload).encoded(), on: command)
 
                 if let outData, hasDataPhase {
@@ -288,7 +296,18 @@ public actor PTPIPTransport: PTPTransport {
         guard start.payload.count >= 12 else {
             throw PTPIPError.malformedPacket("Start Data Packet payload too short for declared length")
         }
-        let totalLength = Int(start.payload.readLE(UInt64.self, at: 4))
+        let declaredLength = start.payload.readLE(UInt64.self, at: 4)
+        // Cap at 256MB: a corrupted or spoofed declared length (this is
+        // cleartext, unauthenticated PTP/IP on a shared LAN — any device on
+        // the network can send bytes here) previously drove an unbounded
+        // reserveCapacity() and an Int(UInt64) conversion that TRAPS the
+        // process outright for declared lengths >= 2^63. The largest real
+        // capture this app handles is an EOS R RAW+JPEG frame, nowhere
+        // close to this ceiling.
+        guard declaredLength < 256_000_000 else {
+            throw PTPIPError.malformedPacket("Start Data Packet declared length \(declaredLength) exceeds sane bound")
+        }
+        let totalLength = Int(declaredLength)
         if verbose { log("[\(context)] data phase declared length: \(totalLength) bytes") }
 
         var collected = Data()
@@ -296,11 +315,21 @@ public actor PTPIPTransport: PTPTransport {
         while collected.count < totalLength {
             let packet = try await readPacket(on: connection, context: context)
             switch packet.type {
-            case .dataPacket, .endDataPacket:
+            case .dataPacket:
                 collected.append(packet.payload.dropFirst(4)) // strip leading transaction ID
-                if packet.type == .endDataPacket && collected.count < totalLength {
-                    log("!! [\(context)] End Data Packet arrived with only \(collected.count)/\(totalLength) bytes collected")
+            case .endDataPacket:
+                collected.append(packet.payload.dropFirst(4))
+                if collected.count < totalLength {
+                    // The camera has sent its terminal packet and won't send
+                    // more until the NEXT command — looping back into
+                    // readPacket here previously hung forever waiting for
+                    // bytes that were never coming, deadlocking this actor
+                    // (SerialGate serializes every future send() behind it)
+                    // until Wi-Fi itself eventually died. Trust the End
+                    // marker over the Start packet's declared length instead.
+                    log("!! [\(context)] End Data Packet arrived with only \(collected.count)/\(totalLength) bytes collected — returning short")
                 }
+                return collected
             default:
                 log("!! [\(context)] unexpected \(packet.type) mid-data-phase with \(collected.count)/\(totalLength) bytes collected — treating as end of phase")
                 return collected
@@ -340,11 +369,13 @@ public actor PTPIPTransport: PTPTransport {
         log("captured object handle 0x\(String(objectHandle, radix: 16))")
 
         let infoResult = try await send(code: StandardPTPOp.getObjectInfo, parameters: [objectHandle], outData: nil)
-        // ObjectInfo dataset: compressedSize is a u32 at a fixed offset (52)
-        // per the PTP spec's ObjectInfo structure — used only for logging
-        // here; GetObject below returns the real byte count regardless.
-        if infoResult.payload.count >= 56 {
-            let size = infoResult.payload.readLE(UInt32.self, at: 52)
+        // ObjectInfo dataset per the PTP spec: StorageID(4) + ObjectFormat(2)
+        // + ProtectionStatus(2) + ObjectCompressedSize(4) — the size field is
+        // at offset 8, not 52 (52 lands inside the variable-length Filename
+        // string that follows the fixed header). Log-only either way; the
+        // real download below uses GetObject's actual byte count.
+        if infoResult.payload.count >= 12 {
+            let size = infoResult.payload.readLE(UInt32.self, at: 8)
             log("object info: \(size) bytes reported")
         }
 
@@ -407,27 +438,47 @@ public actor PTPIPTransport: PTPTransport {
 
     private func openConnection() async throws -> NWConnection {
         let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
-        return try await withCheckedThrowingContinuation { continuation in
-            var resumed = false
-            connection.stateUpdateHandler = { state in
-                guard !resumed else { return }
-                switch state {
-                case .ready:
-                    resumed = true
-                    continuation.resume(returning: connection)
-                case .failed(let error):
-                    resumed = true
-                    continuation.resume(throwing: PTPIPError.connectionFailed("\(error)"))
-                case .waiting(let error):
-                    // Keep waiting past transient errors, but surface a hard
-                    // timeout via the outer withThrowingTaskGroup wrapper if
-                    // this never resolves — logged for visibility either way.
-                    Task { await self.log("connection waiting: \(error)") }
-                default:
-                    break
+        // 10s outer race: `.cancelled` (socket torn down before `.ready` —
+        // overlapping connect attempts, app backgrounded mid-handshake) and
+        // `.preparing`/`.setup` were previously unhandled `default: break`
+        // cases that left the continuation unresumed forever, wedging
+        // connect() with no recovery short of killing the app. `.waiting`
+        // still isn't treated as terminal — a transient DNS/route hiccup
+        // can resolve into `.ready` — but now has this timeout as a backstop
+        // instead of the aspirational "outer wrapper" that never existed.
+        do {
+            return try await withTimeout(seconds: 10) {
+                try await withCheckedThrowingContinuation { continuation in
+                    var resumed = false
+                    connection.stateUpdateHandler = { state in
+                        guard !resumed else { return }
+                        switch state {
+                        case .ready:
+                            resumed = true
+                            continuation.resume(returning: connection)
+                        case .failed(let error):
+                            resumed = true
+                            continuation.resume(throwing: PTPIPError.connectionFailed("\(error)"))
+                        case .cancelled:
+                            resumed = true
+                            continuation.resume(throwing: PTPIPError.connectionFailed("connection cancelled before ready"))
+                        case .waiting(let error):
+                            Task { await self.log("connection waiting: \(error)") }
+                        default:
+                            break
+                        }
+                    }
+                    connection.start(queue: .global(qos: .userInitiated))
                 }
             }
-            connection.start(queue: .global(qos: .userInitiated))
+        } catch {
+            // The continuation-based state handler above doesn't observe
+            // Task cancellation on its own — if the outer timeout fired,
+            // the NWConnection is still live and its handler may resolve
+            // (and thus leak) the already-abandoned continuation later.
+            // Cancelling here forces that resolution now instead of never.
+            connection.cancel()
+            throw error
         }
     }
 
@@ -457,6 +508,12 @@ public actor PTPIPTransport: PTPTransport {
             throw PTPIPError.malformedPacket("unknown packet type in header")
         }
         guard length >= 8 else { throw PTPIPError.malformedPacket("packet length \(length) < header size") }
+        // Same sane bound as the data-phase declared length: a corrupted or
+        // spoofed header field (cleartext, unauthenticated LAN protocol)
+        // could otherwise force a multi-GB single-packet allocation attempt.
+        guard length < 256_000_000 else {
+            throw PTPIPError.malformedPacket("packet length \(length) exceeds sane bound")
+        }
         let payload = length > 8 ? try await readExactly(length - 8, on: connection) : Data()
         return PTPIPPacket(type: type, payload: payload)
     }

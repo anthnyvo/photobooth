@@ -7,6 +7,18 @@ import Foundation
 public protocol PTPTransport: Sendable {
     func send(code: UInt16, parameters: [UInt32], outData: Data?) async throws -> PTPTransactionResult
     func nextCapturedFile(timeout: TimeInterval) async throws -> Data
+    /// Vendor-neutral capture retrieval (Nikon/generic): waits for a
+    /// standard PTP ObjectAdded event. Declared as a real protocol
+    /// requirement — a protocol-extension-only method here is resolved by
+    /// STATIC dispatch against the `any PTPTransport` existential type that
+    /// NikonCamera/GenericPTPCamera actually hold, which silently calls the
+    /// extension's default (nextCapturedFile) even when the concrete type
+    /// (PTPIPTransport) has its own override. That bug meant Nikon/generic
+    /// capture retrieval always ran Canon's GetEvent polling instead, and
+    /// always timed out. See PTPIPTransport's override for the real
+    /// ObjectAdded wait; the extension below is only for ICCTransport
+    /// (USB/Canon-only — no dedicated event channel to wait on).
+    func nextCapturedFileViaObjectAdded(timeout: TimeInterval) async throws -> Data
     var events: AsyncStream<TransportEvent> { get }
 }
 
@@ -18,11 +30,13 @@ public extension PTPTransport {
         try await send(code: code, parameters: parameters, outData: outData)
     }
 
-    /// Waits for a standard PTP ObjectAdded event and downloads that object
-    /// — the vendor-neutral capture retrieval used by Nikon/generic bodies.
-    /// Default falls back to the transport's Canon-tuned nextCapturedFile
-    /// (which also checks standard ObjectAdded codes), so transports without
-    /// a dedicated event channel still behave sensibly.
+    /// Default for transports with no dedicated event channel to wait on
+    /// (ICCTransport/USB — Canon-only, no Nikon/generic use case there):
+    /// falls back to the Canon-tuned nextCapturedFile, which also checks
+    /// standard ObjectAdded codes. PTPIPTransport overrides this with a
+    /// real ObjectAdded wait and must keep doing so now that this is a
+    /// protocol requirement (an override, not an extension default, so
+    /// dispatch is correct through the existential).
     func nextCapturedFileViaObjectAdded(timeout: TimeInterval) async throws -> Data {
         try await nextCapturedFile(timeout: timeout)
     }
