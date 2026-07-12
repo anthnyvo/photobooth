@@ -25,24 +25,7 @@ struct AttractView: View {
         ZStack {
             ChassisBackground()
 
-            if let frame = model.liveViewImage {
-                Image(uiImage: frame)
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-                    .liveFilterEffect(model.selectedFilter)
-                    .overlay(Chassis.base.opacity(0.55).ignoresSafeArea())
-                // AR-style prop preview — same pixel aspect as the frame,
-                // so the identical scaledToFill transform keeps the two
-                // layers aligned. Drawn above the dim so props read clearly.
-                if let propOverlay = model.livePropOverlay {
-                    Image(uiImage: propOverlay)
-                        .resizable()
-                        .scaledToFill()
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                }
-            }
+            LiveViewBackdrop(feed: model.liveFeed, filter: model.selectedFilter, dim: 0.55)
 
             VStack(spacing: 24) {
                 Spacer()

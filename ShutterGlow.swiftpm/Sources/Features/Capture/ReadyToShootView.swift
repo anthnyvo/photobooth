@@ -17,21 +17,7 @@ struct ReadyToShootView: View {
         ZStack {
             ChassisBackground()
 
-            if let frame = model.liveViewImage {
-                Image(uiImage: frame)
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-                    .liveFilterEffect(model.selectedFilter)
-                    .overlay(Chassis.base.opacity(0.35).ignoresSafeArea())
-                if let propOverlay = model.livePropOverlay {
-                    Image(uiImage: propOverlay)
-                        .resizable()
-                        .scaledToFill()
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                }
-            }
+            LiveViewBackdrop(feed: model.liveFeed, filter: model.selectedFilter, dim: 0.35)
 
             VStack {
                 HStack {

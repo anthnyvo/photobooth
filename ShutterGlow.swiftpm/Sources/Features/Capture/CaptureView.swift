@@ -15,20 +15,7 @@ struct CaptureView: View {
         ZStack {
             Chassis.base.ignoresSafeArea()
 
-            if let frame = model.liveViewImage {
-                Image(uiImage: frame)
-                    .resizable()
-                    .scaledToFill()
-                    .ignoresSafeArea()
-                    .liveFilterEffect(model.selectedFilter)
-                if let propOverlay = model.livePropOverlay {
-                    Image(uiImage: propOverlay)
-                        .resizable()
-                        .scaledToFill()
-                        .ignoresSafeArea()
-                        .allowsHitTesting(false)
-                }
-            }
+            LiveViewBackdrop(feed: model.liveFeed, filter: model.selectedFilter)
 
             switch model.step {
             case .countdown(let remaining):

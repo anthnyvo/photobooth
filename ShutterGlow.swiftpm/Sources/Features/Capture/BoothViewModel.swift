@@ -26,7 +26,15 @@ public final class BoothViewModel: ObservableObject {
     @Published public private(set) var config: EventConfig
     @Published public private(set) var isSyncing = false
     @Published public private(set) var syncError: String?
-    @Published public var liveViewImage: UIImage?
+    /// Frames and the prop overlay live in their own ObservableObject so
+    /// per-frame churn doesn't invalidate every view observing this model —
+    /// see LiveViewFeed. These passthroughs keep the model's internal code
+    /// (and the couple of non-per-frame readers) unchanged.
+    public let liveFeed = LiveViewFeed()
+    public var liveViewImage: UIImage? {
+        get { liveFeed.image }
+        set { liveFeed.image = newValue }
+    }
     @Published public var cameraIPText: String = "192.168.1.2"
     @Published public private(set) var connectionMessage: String = "Enter the camera's IP and connect"
     @Published public private(set) var lastError: String?
@@ -45,9 +53,12 @@ public final class BoothViewModel: ObservableObject {
     /// Boomerang/GIF). Resets per guest, same as selectedFilter.
     @Published public var selectedProp: PhotoProp = .none
     /// Transparent props-only frame matching the live view's pixel aspect —
-    /// rendered a few times a second by runLivePropOverlayLoop() and layered
-    /// over the live feed for an AR-style preview of the guest's prop pick.
-    @Published public private(set) var livePropOverlay: UIImage?
+    /// rendered a few times a second by runLivePropOverlayLoop(). Stored on
+    /// liveFeed (per-frame churn, same reasoning as liveViewImage).
+    public private(set) var livePropOverlay: UIImage? {
+        get { liveFeed.propOverlay }
+        set { liveFeed.propOverlay = newValue }
+    }
     /// Behind-the-scenes timelapse of the last strip session — the frantic
     /// pose scramble between shots, sampled from live view and encoded as a
     /// fast GIF. Non-nil only after a timelapse-enabled strip completes;
@@ -254,16 +265,25 @@ public final class BoothViewModel: ObservableObject {
             }
             let frames = try await camera.startLiveView()
             liveViewConsumer?.cancel()
-            liveViewConsumer = Task { [weak self] in
+            // Detached on purpose: a plain Task{} here inherits the main
+            // actor, which put every frame's JPEG decode on the main thread
+            // — and UIImage defers the actual bitmap decompress to first
+            // render, landing that on the main thread too. Decoding AND
+            // rasterizing (preparingForDisplay) off-main turns each frame's
+            // main-thread cost into a pointer swap + composited blit, which
+            // is both the smoothness fix and an effective frame-rate raise:
+            // the stream buffers only the newest frame, so a slow consumer
+            // was silently dropping frames the camera had already delivered.
+            liveViewConsumer = Task.detached(priority: .userInitiated) { [weak self] in
                 for await jpeg in frames {
                     guard let self else { return }
-                    if let image = UIImage(data: jpeg) {
-                        await MainActor.run {
-                            self.liveViewImage = image
-                            self.latestLiveFrameJPEG = jpeg
-                            if self.isRecordingFrames {
-                                self.recordedFrames.append(jpeg)
-                            }
+                    guard let raw = UIImage(data: jpeg) else { continue }
+                    let image = raw.preparingForDisplay() ?? raw
+                    await MainActor.run {
+                        self.liveFeed.image = image
+                        self.latestLiveFrameJPEG = jpeg
+                        if self.isRecordingFrames {
+                            self.recordedFrames.append(jpeg)
                         }
                     }
                 }
@@ -346,7 +366,12 @@ public final class BoothViewModel: ObservableObject {
         if totalShots > 1 && config.timelapseEnabled {
             timelapseSampler = Task { [weak self] in
                 while !Task.isCancelled {
-                    if let self, let jpeg = self.liveViewImage?.jpegData(compressionQuality: 0.6) {
+                    // Raw camera bytes straight into the buffer. The old
+                    // path re-encoded the displayed UIImage to JPEG on the
+                    // main thread twice a second for the whole sequence —
+                    // right through the countdowns and shutter round-trips
+                    // where the main thread is busiest.
+                    if let self, let jpeg = self.latestLiveFrameJPEG {
                         timelapseFrames.append(jpeg)
                         if timelapseFrames.count >= 140 { return }
                     }

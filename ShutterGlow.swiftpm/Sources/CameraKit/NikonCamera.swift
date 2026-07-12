@@ -79,7 +79,11 @@ public actor NikonCamera: TetheredCamera {
                     if case .frame(let jpeg, _) = LiveViewParser.extractJPEG(result.payload) {
                         continuation.yield(jpeg)
                     }
-                    try? await Task.sleep(nanoseconds: 33_000_000)
+                    // Tiny yield only — same finding as Canon: the poll
+                    // round-trip itself is the pace-setter, and a fixed
+                    // 33ms on top of it was capping the feed well below
+                    // what the body can deliver.
+                    try? await Task.sleep(nanoseconds: 10_000_000)
                 } catch {
                     try? await Task.sleep(nanoseconds: 300_000_000)
                 }
