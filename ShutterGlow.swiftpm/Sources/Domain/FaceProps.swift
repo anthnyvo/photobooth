@@ -13,6 +13,11 @@ public enum PhotoProp: String, CaseIterable, Sendable, Identifiable {
     case dogEars
     case crown
     case hearts
+    case flowerCrown
+    case bunnyEars
+    case catWhiskers
+    case devilHorns
+    case rainbow
 
     public var id: String { rawValue }
 
@@ -24,6 +29,11 @@ public enum PhotoProp: String, CaseIterable, Sendable, Identifiable {
         case .dogEars: "Dog Ears"
         case .crown: "Crown"
         case .hearts: "Hearts"
+        case .flowerCrown: "Flower Crown"
+        case .bunnyEars: "Bunny Ears"
+        case .catWhiskers: "Cat"
+        case .devilHorns: "Devil"
+        case .rainbow: "Rainbow"
         }
     }
 }
@@ -343,6 +353,16 @@ enum FacePropRenderer {
             drawCrown(d: d, faceWidth: faceWidth, top: localTop, cg)
         case .hearts:
             drawHearts(d: d, faceWidth: faceWidth, cg)
+        case .flowerCrown:
+            drawFlowerCrown(d: d, faceWidth: faceWidth, top: localTop, cg)
+        case .bunnyEars:
+            drawBunnyEars(d: d, faceWidth: faceWidth, top: localTop, cg)
+        case .catWhiskers:
+            drawCatWhiskers(d: d, faceWidth: faceWidth, top: localTop, mouth: localMouth, cg)
+        case .devilHorns:
+            drawDevilHorns(d: d, faceWidth: faceWidth, top: localTop, cg)
+        case .rainbow:
+            drawRainbow(d: d, mouth: localMouth, cg)
         }
         cg.restoreGState()
     }
@@ -482,5 +502,166 @@ enum FacePropRenderer {
         )
         path.close()
         return path
+    }
+
+    // MARK: - Snapchat-style props
+
+    private static func drawFlowerCrown(d: CGFloat, faceWidth: CGFloat, top: CGFloat, _ cg: CGContext) {
+        let baseY = top + d * 0.12
+        let petalColors: [UIColor] = [
+            UIColor(red: 0.96, green: 0.55, blue: 0.68, alpha: 0.97),
+            UIColor(red: 0.99, green: 0.85, blue: 0.35, alpha: 0.97),
+            UIColor(red: 0.85, green: 0.42, blue: 0.85, alpha: 0.97),
+            UIColor(red: 0.99, green: 0.85, blue: 0.35, alpha: 0.97),
+            UIColor(red: 0.96, green: 0.55, blue: 0.68, alpha: 0.97),
+        ]
+        let count = petalColors.count
+        cg.setFillColor(UIColor(red: 0.30, green: 0.55, blue: 0.28, alpha: 0.9).cgColor)
+        for i in 0..<(count - 1) {
+            let x0 = faceWidth * (CGFloat(i) / CGFloat(count - 1) - 0.5) * 0.86
+            let x1 = faceWidth * (CGFloat(i + 1) / CGFloat(count - 1) - 0.5) * 0.86
+            let leaf = UIBezierPath(ovalIn: CGRect(
+                x: (x0 + x1) / 2 - d * 0.08, y: baseY - d * 0.06,
+                width: d * 0.16, height: d * 0.1
+            ))
+            cg.addPath(leaf.cgPath)
+            cg.fillPath()
+        }
+        for (i, color) in petalColors.enumerated() {
+            let x = faceWidth * (CGFloat(i) / CGFloat(count - 1) - 0.5) * 0.86
+            let dip = abs(CGFloat(i) - CGFloat(count - 1) / 2)
+            let y = baseY + dip * d * 0.045
+            drawFlower(at: CGPoint(x: x, y: y), size: d * 0.24, petalColor: color, cg)
+        }
+    }
+
+    private static func drawFlower(at center: CGPoint, size: CGFloat, petalColor: UIColor, _ cg: CGContext) {
+        cg.setFillColor(petalColor.cgColor)
+        let petalCount = 5
+        for i in 0..<petalCount {
+            let angle = CGFloat(i) / CGFloat(petalCount) * 2 * .pi
+            let px = center.x + cos(angle) * size * 0.4
+            let py = center.y + sin(angle) * size * 0.4
+            cg.fillEllipse(in: CGRect(x: px - size * 0.32, y: py - size * 0.32, width: size * 0.64, height: size * 0.64))
+        }
+        cg.setFillColor(UIColor(red: 0.98, green: 0.78, blue: 0.20, alpha: 1).cgColor)
+        cg.fillEllipse(in: CGRect(x: center.x - size * 0.22, y: center.y - size * 0.22, width: size * 0.44, height: size * 0.44))
+    }
+
+    private static func drawBunnyEars(d: CGFloat, faceWidth: CGFloat, top: CGFloat, _ cg: CGContext) {
+        let earWidth = faceWidth * 0.20
+        let earHeight = earWidth * 3.1
+        let earY = top - earHeight * 0.82
+        let white = UIColor.white.withAlphaComponent(0.97)
+        let pink = UIColor(red: 0.94, green: 0.62, blue: 0.68, alpha: 0.95)
+
+        for side: CGFloat in [-1, 1] {
+            let earX = side * faceWidth * 0.22 - earWidth / 2
+            let outer = CGRect(x: earX, y: earY, width: earWidth, height: earHeight)
+            cg.setFillColor(white.cgColor)
+            cg.addPath(UIBezierPath(roundedRect: outer, cornerRadius: earWidth / 2).cgPath)
+            cg.fillPath()
+            let inner = outer.insetBy(dx: earWidth * 0.28, dy: earHeight * 0.14)
+            cg.setFillColor(pink.cgColor)
+            cg.addPath(UIBezierPath(roundedRect: inner, cornerRadius: inner.width / 2).cgPath)
+            cg.fillPath()
+        }
+    }
+
+    private static func drawCatWhiskers(d: CGFloat, faceWidth: CGFloat, top: CGFloat, mouth: CGPoint, _ cg: CGContext) {
+        let earWidth = faceWidth * 0.30
+        let earHeight = earWidth * 1.1
+        let earY = top - earHeight * 0.05
+        let gray = UIColor(red: 0.42, green: 0.40, blue: 0.44, alpha: 0.95)
+        let pinkInner = UIColor(red: 0.93, green: 0.62, blue: 0.68, alpha: 0.95)
+
+        for side: CGFloat in [-1, 1] {
+            let baseX = side * faceWidth * 0.30
+            let outer = UIBezierPath()
+            outer.move(to: CGPoint(x: baseX - earWidth / 2, y: earY + earHeight))
+            outer.addLine(to: CGPoint(x: baseX, y: earY))
+            outer.addLine(to: CGPoint(x: baseX + earWidth / 2, y: earY + earHeight))
+            outer.close()
+            cg.setFillColor(gray.cgColor)
+            cg.addPath(outer.cgPath)
+            cg.fillPath()
+
+            let s: CGFloat = 0.55
+            let inner = UIBezierPath()
+            inner.move(to: CGPoint(x: baseX - earWidth * s / 2, y: earY + earHeight))
+            inner.addLine(to: CGPoint(x: baseX, y: earY + earHeight * (1 - s)))
+            inner.addLine(to: CGPoint(x: baseX + earWidth * s / 2, y: earY + earHeight))
+            inner.close()
+            cg.setFillColor(pinkInner.cgColor)
+            cg.addPath(inner.cgPath)
+            cg.fillPath()
+        }
+
+        let nose = UIBezierPath()
+        nose.move(to: CGPoint(x: mouth.x, y: mouth.y - d * 0.28))
+        nose.addLine(to: CGPoint(x: mouth.x - d * 0.09, y: mouth.y - d * 0.15))
+        nose.addLine(to: CGPoint(x: mouth.x + d * 0.09, y: mouth.y - d * 0.15))
+        nose.close()
+        cg.setFillColor(pinkInner.cgColor)
+        cg.addPath(nose.cgPath)
+        cg.fillPath()
+
+        cg.setStrokeColor(UIColor.black.withAlphaComponent(0.55).cgColor)
+        cg.setLineWidth(d * 0.035)
+        cg.setLineCap(.round)
+        for side: CGFloat in [-1, 1] {
+            for i in 0..<3 {
+                let yOff = mouth.y - d * 0.05 + CGFloat(i) * d * 0.12
+                cg.move(to: CGPoint(x: side * d * 0.18, y: yOff))
+                cg.addLine(to: CGPoint(x: side * d * (0.75 + CGFloat(i) * 0.08), y: yOff - d * 0.05 + CGFloat(i) * d * 0.03))
+            }
+        }
+        cg.strokePath()
+    }
+
+    private static func drawDevilHorns(d: CGFloat, faceWidth: CGFloat, top: CGFloat, _ cg: CGContext) {
+        let red = UIColor(red: 0.82, green: 0.14, blue: 0.18, alpha: 0.95)
+        let hornWidth = faceWidth * 0.16
+        let hornHeight = hornWidth * 1.7
+        let baseY = top + d * 0.12
+
+        for side: CGFloat in [-1, 1] {
+            let baseX = side * faceWidth * 0.26
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: baseX - hornWidth / 2, y: baseY))
+            path.addQuadCurve(
+                to: CGPoint(x: baseX + side * hornWidth * 0.35, y: baseY - hornHeight),
+                controlPoint: CGPoint(x: baseX - side * hornWidth * 0.15, y: baseY - hornHeight * 0.65)
+            )
+            path.addQuadCurve(
+                to: CGPoint(x: baseX + hornWidth / 2, y: baseY),
+                controlPoint: CGPoint(x: baseX + side * hornWidth * 0.95, y: baseY - hornHeight * 0.5)
+            )
+            path.close()
+            cg.setFillColor(red.cgColor)
+            cg.addPath(path.cgPath)
+            cg.fillPath()
+        }
+    }
+
+    private static func drawRainbow(d: CGFloat, mouth: CGPoint, _ cg: CGContext) {
+        let colors: [UIColor] = [
+            UIColor(red: 0.91, green: 0.20, blue: 0.24, alpha: 0.9),
+            UIColor(red: 0.97, green: 0.55, blue: 0.15, alpha: 0.9),
+            UIColor(red: 0.98, green: 0.85, blue: 0.20, alpha: 0.9),
+            UIColor(red: 0.30, green: 0.70, blue: 0.35, alpha: 0.9),
+            UIColor(red: 0.25, green: 0.45, blue: 0.85, alpha: 0.9),
+            UIColor(red: 0.55, green: 0.30, blue: 0.75, alpha: 0.9),
+        ]
+        let radius = d * 1.3
+        let lineWidth = d * 0.16
+        cg.setLineCap(.round)
+        for (i, color) in colors.enumerated() {
+            cg.setStrokeColor(color.cgColor)
+            cg.setLineWidth(lineWidth)
+            let r = radius - CGFloat(i) * lineWidth * 0.95
+            cg.addArc(center: mouth, radius: r, startAngle: .pi * 0.15, endAngle: .pi * 0.85, clockwise: false)
+            cg.strokePath()
+        }
     }
 }

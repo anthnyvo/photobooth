@@ -226,6 +226,61 @@ struct PropPreview: View {
                         y: [-18, -32, -18][index]
                     )
             }
+        case .flowerCrown:
+            HStack(spacing: 4) {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .fill([
+                            Color(red: 0.96, green: 0.55, blue: 0.68),
+                            Color(red: 0.99, green: 0.85, blue: 0.35),
+                            Color(red: 0.85, green: 0.42, blue: 0.85),
+                        ][i])
+                        .frame(width: 11, height: 11)
+                }
+            }
+            .offset(y: -27)
+        case .bunnyEars:
+            HStack(spacing: 12) {
+                bunnyEar
+                bunnyEar
+            }
+            .offset(y: -35)
+        case .catWhiskers:
+            ZStack {
+                HStack(spacing: 20) {
+                    Triangle().fill(Color(red: 0.42, green: 0.40, blue: 0.44)).frame(width: 15, height: 14)
+                    Triangle().fill(Color(red: 0.42, green: 0.40, blue: 0.44)).frame(width: 15, height: 14)
+                }
+                .offset(y: -26)
+                Ellipse()
+                    .fill(Color(red: 0.93, green: 0.62, blue: 0.68))
+                    .frame(width: 7, height: 5)
+                    .offset(y: 5)
+            }
+        case .devilHorns:
+            HStack(spacing: 24) {
+                Triangle().fill(Color(red: 0.82, green: 0.14, blue: 0.18)).frame(width: 9, height: 13)
+                Triangle().fill(Color(red: 0.82, green: 0.14, blue: 0.18)).frame(width: 9, height: 13)
+            }
+            .offset(y: -30)
+        case .rainbow:
+            RainbowArc()
+                .stroke(
+                    AngularGradient(
+                        colors: [.red, .orange, .yellow, .green, .blue, .purple],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                )
+                .frame(width: 32, height: 16)
+                .offset(y: 15)
+        }
+    }
+
+    private var bunnyEar: some View {
+        ZStack {
+            Capsule().fill(Color.white).frame(width: 9, height: 26)
+            Capsule().fill(Color(red: 0.94, green: 0.62, blue: 0.68)).frame(width: 4, height: 18)
         }
     }
 }
@@ -255,6 +310,30 @@ private struct CrownShape: Shape {
         }
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
         path.closeSubpath()
+        return path
+    }
+}
+
+private struct Triangle: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+private struct RainbowArc: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.addArc(
+            center: CGPoint(x: rect.midX, y: rect.minY),
+            radius: rect.width / 2,
+            startAngle: .degrees(30), endAngle: .degrees(150),
+            clockwise: false
+        )
         return path
     }
 }
