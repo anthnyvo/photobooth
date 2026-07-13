@@ -22,6 +22,38 @@ public enum RemoteSync {
         case network
     }
 
+    /// Deletes an event on the backend, for a remote (dashboard-synced)
+    /// event's "Delete Event" button in AdminView. A purely local delete
+    /// wasn't enough for these: the very next sync (which runs whenever the
+    /// booth returns to the event picker) re-pulls the org's full event
+    /// list from Supabase — since the server never learned about the
+    /// delete, it just re-downloads the "missing" event and recreates it
+    /// locally with a fresh createdAt, which is why it silently reappeared
+    /// at the top of the list instead of staying deleted. Throws
+    /// SyncError.network on a non-2xx response, including RLS rejecting an
+    /// operator session (events_write requires owner/admin) — the caller
+    /// should surface that rather than deleting locally and letting the
+    /// event quietly come back a moment later.
+    public static func deleteRemoteEvent(_ id: String) async throws {
+        guard let session = await SupabaseAuth.shared.validSession() else {
+            throw SyncError.notSignedIn
+        }
+        var request = URLRequest(url: URL(string: "rest/v1/events?id=eq.\(id)", relativeTo: projectURL)!)
+        request.httpMethod = "DELETE"
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+
+        let response: URLResponse
+        do {
+            (_, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw SyncError.network
+        }
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SyncError.network
+        }
+    }
+
     @discardableResult
     public static func syncEvents() async throws -> Int {
         guard let session = await SupabaseAuth.shared.validSession() else {

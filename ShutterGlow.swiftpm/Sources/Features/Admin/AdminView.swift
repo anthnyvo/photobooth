@@ -457,13 +457,43 @@ struct AdminView: View {
         }
     }
 
-    /// Deletes the active event on disk, then backs out to the event
-    /// picker — there's no valid "current" event left to fall back into.
+    /// Deletes the event, then backs out to the event picker — there's no
+    /// valid "current" event left to fall back into.
+    ///
+    /// For a purely local event (never synced), deleting on disk is
+    /// enough — there's no server copy to worry about. For a remote
+    /// (dashboard-synced) event, deleting locally-only isn't durable: the
+    /// booth re-syncs its event list every time it returns to the picker,
+    /// and since the server never learned about the delete, that sync
+    /// just re-downloads the "missing" event and recreates it locally
+    /// with a fresh createdAt — which is why deleting used to silently
+    /// undo itself and bump the event to the top of the list instead of
+    /// removing it. The server delete now runs FIRST, so a failure (e.g.
+    /// an operator session — deleting requires owner/admin) reports an
+    /// error instead of removing the event locally only for it to
+    /// reappear moments later.
     private func deleteEvent() {
         let idToDelete = model.config.eventId
-        try? EventStorage.shared.deleteEvent(idToDelete)
-        model.backToEventPicker()
-        dismiss()
+        guard model.config.isRemote else {
+            try? EventStorage.shared.deleteEvent(idToDelete)
+            model.backToEventPicker()
+            dismiss()
+            return
+        }
+        Task {
+            do {
+                try await RemoteSync.deleteRemoteEvent(idToDelete)
+                try? EventStorage.shared.deleteEvent(idToDelete)
+                await MainActor.run {
+                    model.backToEventPicker()
+                    dismiss()
+                }
+            } catch {
+                await MainActor.run {
+                    saveMessage = "Couldn't delete — only the org owner or an admin can delete an event. Try from the dashboard, or ask them."
+                }
+            }
+        }
     }
 }
 
