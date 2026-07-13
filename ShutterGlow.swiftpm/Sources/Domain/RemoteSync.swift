@@ -43,14 +43,28 @@ public enum RemoteSync {
         request.httpMethod = "DELETE"
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        // PostgREST returns 200/204 for a DELETE that matched zero rows —
+        // RLS filters rows rather than rejecting the request, so an
+        // operator session (events_write requires owner/admin) with no
+        // permission to delete this event gets an HTTP-success response
+        // with nothing actually deleted server-side. Status code alone
+        // can't tell the difference; asking for the deleted rows back and
+        // checking the body isn't empty is the only way to know the
+        // delete actually happened.
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
 
+        let data: Data
         let response: URLResponse
         do {
-            (_, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await URLSession.shared.data(for: request)
         } catch {
             throw SyncError.network
         }
         guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw SyncError.network
+        }
+        let deletedRows = (try? JSONSerialization.jsonObject(with: data)) as? [Any]
+        guard let deletedRows, !deletedRows.isEmpty else {
             throw SyncError.network
         }
     }
