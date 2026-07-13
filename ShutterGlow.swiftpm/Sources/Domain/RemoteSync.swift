@@ -7,12 +7,13 @@ import Foundation
 /// zero signal never stops an event that's already been paired.
 ///
 /// Deliberately maps only the fields the web dashboard's booth_configs
-/// schema actually has (print layout, countdown, filters/animations,
-/// square crop, overlay image). Branding colors, logo, share/print
-/// channels, and print limits aren't in that schema yet, so a synced event
+/// schema actually has (print layout/limits, countdown, filters/
+/// animations, square crop, overlay image, AirDrop/QR/email share
+/// channels). Branding colors and logo aren't in that schema yet (no
+/// asset-upload path wired on the dashboard side), so a synced event
 /// keeps whatever it already had locally for those — the on-device Admin
-/// screen remains the way to set them until the dashboard grows matching
-/// fields.
+/// screen remains the way to set them until the dashboard grows a
+/// matching image upload.
 public enum RemoteSync {
     private static let projectURL = SupabaseAuth.projectURL
     private static let anonKey = SupabaseAuth.anonKey
@@ -127,6 +128,24 @@ public enum RemoteSync {
                 smileShutter: config.liveViewSettings.smileShutter ?? false
             )
             local.timelapseEnabled = config.liveViewSettings.timelapseEnabled ?? false
+            // Print/share were previously local-only (set from this app's
+            // own Admin screen with no dashboard equivalent, despite the
+            // web docs implying otherwise) — the dashboard config form now
+            // has matching controls, so a synced row carries real values
+            // instead of always falling back to true/true/false here.
+            local.print = EventConfig.PrintOptions(
+                enabled: config.liveViewSettings.printEnabled ?? true,
+                limitPerGuest: config.liveViewSettings.printLimitPerGuest
+            )
+            local.share = EventConfig.ShareOptions(
+                airdrop: config.liveViewSettings.shareAirdrop ?? true,
+                qrGallery: config.liveViewSettings.shareQrGallery ?? true,
+                // SMS isn't exposed on either the app's own Admin screen or
+                // the dashboard yet — preserve whatever local already has
+                // rather than silently resetting it.
+                sms: local.share.sms,
+                email: config.liveViewSettings.shareEmail ?? false
+            )
 
             // Newer dashboard rows carry the full offered sets in the
             // jsonb; rows saved before that only have the single
@@ -205,6 +224,16 @@ public enum RemoteSync {
             let stripShotCounts: [Int]?
             let stripLayouts: [String]?
             let timelapseEnabled: Bool?
+            /// Optional for the same pre-existing-rows reason as the AI
+            /// toggles above — rows saved before the dashboard grew
+            /// print/share controls simply lack these keys.
+            let printEnabled: Bool?
+            /// nil (missing key or explicit JSON null) = unlimited, same
+            /// meaning as EventConfig.PrintOptions.limitPerGuest.
+            let printLimitPerGuest: Int?
+            let shareAirdrop: Bool?
+            let shareQrGallery: Bool?
+            let shareEmail: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
@@ -217,6 +246,11 @@ public enum RemoteSync {
                 case stripShotCounts = "strip_shot_counts"
                 case stripLayouts = "strip_layouts"
                 case timelapseEnabled = "timelapse_enabled"
+                case printEnabled = "print_enabled"
+                case printLimitPerGuest = "print_limit_per_guest"
+                case shareAirdrop = "share_airdrop"
+                case shareQrGallery = "share_qr_gallery"
+                case shareEmail = "share_email"
             }
         }
     }
