@@ -230,6 +230,18 @@ public final class BoothViewModel: ObservableObject {
             return
         }
 
+        // USB webcam mode is a wired UVC video feed, not a network
+        // protocol — no IP, no transport handshake, same shared
+        // remote-mode + live-view bring-up as Sony's HTTP path above.
+        if selectedBrand == .usbWebcam {
+            transport = nil
+            camera = UVCWebcamCamera()
+            Task {
+                await startRemoteModeAndLiveView()
+            }
+            return
+        }
+
         let wifiTransport = PTPIPTransport(host: cameraIPText)
         transport = wifiTransport
         let cam: any TetheredCamera
@@ -237,7 +249,7 @@ public final class BoothViewModel: ObservableObject {
         case .canonEOS: cam = EOSCamera(transport: wifiTransport)
         case .nikon: cam = NikonCamera(transport: wifiTransport)
         case .fujifilm, .genericPTP: cam = GenericPTPCamera(transport: wifiTransport)
-        case .sony: return // handled above
+        case .sony, .usbWebcam: return // handled above
         }
         camera = cam
 

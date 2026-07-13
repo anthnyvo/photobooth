@@ -175,20 +175,26 @@ private struct ConnectView: View {
                 .entrance(entered, delay: 0.1)
 
                 VStack(spacing: 14) {
-                    ChassisLabel(text: "Camera IP", size: 10)
+                    // Wired UVC webcam mode has no IP to enter — it's a
+                    // cable, not a network connection.
+                    if model.selectedBrand != .usbWebcam {
+                        ChassisLabel(text: "Camera IP", size: 10)
+                    }
                     HStack(spacing: 12) {
-                        TextField("192.168.1.2", text: $model.cameraIPText)
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(Chassis.textPrimary)
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 16)
-                            .background(Capsule().fill(Chassis.control))
-                            .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
-                            .frame(width: 190)
-                            #if os(iOS)
-                            .keyboardType(.numbersAndPunctuation)
-                            .textInputAutocapitalization(.never)
-                            #endif
+                        if model.selectedBrand != .usbWebcam {
+                            TextField("192.168.1.2", text: $model.cameraIPText)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(Chassis.textPrimary)
+                                .padding(.vertical, 12)
+                                .padding(.horizontal, 16)
+                                .background(Capsule().fill(Chassis.control))
+                                .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                                .frame(width: 190)
+                                #if os(iOS)
+                                .keyboardType(.numbersAndPunctuation)
+                                .textInputAutocapitalization(.never)
+                                #endif
+                        }
                         Button(action: model.connectCamera) {
                             Text("Connect")
                                 .font(.system(size: 15, weight: .semibold))
