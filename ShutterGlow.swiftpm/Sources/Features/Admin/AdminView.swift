@@ -206,18 +206,36 @@ struct AdminView: View {
                             Text("Attendant PIN")
                                 .font(.system(size: 15, weight: .medium))
                                 .foregroundStyle(Chassis.textPrimary)
-                            HStack(spacing: 12) {
+                            // Two separate bars, not one shared row — side
+                            // by side they read as a single field split in
+                            // two, which made it easy to type the new PIN
+                            // into the wrong half.
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Current PIN")
+                                    .font(.caption)
+                                    .foregroundStyle(Chassis.textSecondary)
                                 SecureField("Current", text: $currentPINEntry)
                                     .keyboardType(.numberPad)
-                                SecureField("New (4 digits)", text: $newPINEntry)
-                                    .keyboardType(.numberPad)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 15, design: .monospaced))
+                                    .foregroundStyle(Chassis.textPrimary)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 14)
+                                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Chassis.control))
                             }
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 15, design: .monospaced))
-                            .foregroundStyle(Chassis.textPrimary)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 14)
-                            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Chassis.control))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("New PIN (4 digits)")
+                                    .font(.caption)
+                                    .foregroundStyle(Chassis.textSecondary)
+                                SecureField("New", text: $newPINEntry)
+                                    .keyboardType(.numberPad)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 15, design: .monospaced))
+                                    .foregroundStyle(Chassis.textPrimary)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 14)
+                                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Chassis.control))
+                            }
 
                             Button("Update PIN", action: changePIN)
                                 .buttonStyle(.plain)
