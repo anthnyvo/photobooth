@@ -45,6 +45,20 @@ let package = Package(
             resources: [
                 .process("Assets.xcassets")
             ]
+        ),
+        // Pure-logic tests only (byte parsing/encoding, no UIKit/camera
+        // hardware) — runs via `swift test` on the CI macOS runner, since
+        // there's no local Mac to run it on otherwise. `@testable import
+        // AppModule` works against this executable target because its entry
+        // point is `@main`-attributed (ShutterGlowApp.swift), not a plain
+        // main.swift. NOTE: if this project is ever opened and saved from
+        // within the Swift Playgrounds app itself (not just edited as files),
+        // check this target survived — Playgrounds has been observed
+        // dropping unrecognized manifest content on save (FB9824864).
+        .testTarget(
+            name: "AppModuleTests",
+            dependencies: ["AppModule"],
+            path: "Tests/AppModuleTests"
         )
     ]
 )
