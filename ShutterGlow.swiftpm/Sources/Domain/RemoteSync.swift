@@ -106,6 +106,26 @@ public enum RemoteSync {
         }
     }
 
+    /// Logs a guest session on the backend for the dashboard's Insights page
+    /// — see supabase/migrations/0010_guest_sessions.sql (shutterglow-web
+    /// repo). Best-effort only: must never block or fail the guest capture
+    /// flow, since the whole point of the local-first design is that a
+    /// venue with zero signal keeps running — callers fire this from a
+    /// detached Task and ignore the result. No-ops for a purely local event
+    /// (attendant-typed slug, not a UUID) since it was never synced from the
+    /// dashboard and doesn't exist server-side to reference.
+    public static func recordRemoteGuestSession(eventId: String) async {
+        guard let session = await SupabaseAuth.shared.validSession(),
+              UUID(uuidString: eventId) != nil else { return }
+        var request = URLRequest(url: URL(string: "rest/v1/guest_sessions", relativeTo: projectURL)!)
+        request.httpMethod = "POST"
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONEncoder().encode(["event_id": eventId])
+        _ = try? await URLSession.shared.data(for: request)
+    }
+
     private static func fetch<T: Decodable>(_ type: T.Type, path: String, session: AuthSession) async throws -> T {
         var request = URLRequest(url: URL(string: path, relativeTo: projectURL)!)
         request.setValue(anonKey, forHTTPHeaderField: "apikey")

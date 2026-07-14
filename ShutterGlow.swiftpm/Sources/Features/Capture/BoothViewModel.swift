@@ -340,7 +340,7 @@ public final class BoothViewModel: ObservableObject {
     public func tapToStart(stripShotCount: Int? = nil, layout: EventConfig.StripOptions.Layout = .vertical) {
         guard step == .attract else { return }
         returnToAttractTask?.cancel()
-        EventStorage.shared.recordGuestSession(eventId: config.eventId)
+        recordGuestSession()
         sessionShotCount = stripShotCount.map { max(2, $0) } ?? 1
         sessionLayout = layout
         sessionAnimatedStyle = nil
@@ -352,9 +352,21 @@ public final class BoothViewModel: ObservableObject {
     public func tapToStartAnimated(_ style: AnimatedStyle) {
         guard step == .attract else { return }
         returnToAttractTask?.cancel()
-        EventStorage.shared.recordGuestSession(eventId: config.eventId)
+        recordGuestSession()
         sessionAnimatedStyle = style
         step = .readyToShoot
+    }
+
+    /// Local counter (attendant status panel, always works offline) plus a
+    /// best-effort backend log for the dashboard's Insights page — see
+    /// RemoteSync.recordRemoteGuestSession's doc comment for why that half
+    /// is fire-and-forget from a detached Task.
+    private func recordGuestSession() {
+        EventStorage.shared.recordGuestSession(eventId: config.eventId)
+        let eventId = config.eventId
+        Task.detached(priority: .background) {
+            await RemoteSync.recordRemoteGuestSession(eventId: eventId)
+        }
     }
 
     /// The actual "go" — called from the Touch to Shoot screen.
