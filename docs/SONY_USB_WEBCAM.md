@@ -1,7 +1,9 @@
-# Sony a7 IV (and other UVC bodies) — USB Webcam path
+# USB Webcam path (any native-UVC camera body)
 
-Status: **untested on hardware**. Blocked on getting a USB-C iPad. See
-checklist below for what's left before this is verified.
+Status: **confirmed working on hardware** — tested on a Sony a7 IV,
+2026-07-15. Not Sony-specific: the implementation has zero brand-specific
+code, so any camera whose firmware exposes native UVC works through this
+exact same path. See "Other camera bodies" below for a list.
 
 ## Why this path exists
 
@@ -29,7 +31,26 @@ Streaming" webcam mode. iPadOS 17+ added native external-camera support
 to AVFoundation (`AVCaptureDevice.DeviceType.external`) — no vendor SDK,
 no PTP, just treats the camera like a plug-in webcam. Implemented in
 `Sources/CameraKit/UVCWebcamCamera.swift`, wired in as the **"USB Webcam
-(beta)"** camera brand.
+(tested)"** camera brand.
+
+## Other camera bodies
+
+Nothing in `UVCWebcamCamera.swift` is Sony-specific — it's a generic
+`AVCaptureDevice.DiscoverySession(deviceTypes: [.external], ...)` lookup.
+Any body whose firmware exposes native UVC (not a PC/Mac-only driver like
+older webcam-utility software) works through this exact same code path.
+Confirmed-UVC bodies as of 2026:
+
+- **Canon:** EOS R1, R5 Mark II, R6 Mark II/III/V, R8, R50 — **not** the
+  original EOS R this app also supports (that body has zero UVC support;
+  it uses the separate Wi-Fi PTP/IP path instead, see `docs/PHASE0.md`)
+- **Nikon:** Z5 II, Z50 II, ZR, Z6 III (via firmware update)
+- **Fujifilm:** X100VI, X-E5, X-H2, X-H2S, X-M5, X-S20, X-T30 III, X-T5, X-T50
+- **Panasonic:** Lumix S1 II, S1 IIE, L10
+
+**Not compatible:** GoPro — uses a proprietary USB protocol instead of
+standard UVC, needs GoPro's own webcam driver software, won't be
+discovered by `.external` at all.
 
 ## Hard platform requirement
 
@@ -64,21 +85,21 @@ Lightning port is a dead end regardless of adapter.
    (charge-only cables won't expose the UVC device class).
 3. Confirm the camera's own screen shows a **USB Streaming** active
    indicator once plugged in.
-4. In the app: brand picker → **USB Webcam (beta)** → Connect. No IP
+4. In the app: brand picker → **USB Webcam (tested)** → Connect. No IP
    field — it's a wired connection, not network.
 5. iOS will prompt for camera permission on first connect. If missed:
    Settings → ShutterGlow → Camera.
 
 ## Checklist
 
-- [ ] Get a USB-C iPad (10th gen 2022+, or Air/mini 6+/Pro 2018+),
+- [x] Get a USB-C iPad (10th gen 2022+, or Air/mini 6+/Pro 2018+),
       iPadOS 17+
-- [ ] Sideload latest build via AltServer (see root README for the
+- [x] Sideload latest build via AltServer (see root README for the
       AltStore flow)
-- [ ] Camera in USB Streaming mode, connected via data-capable USB-C cable
-- [ ] App: USB Webcam (beta) → Connect
-- [ ] Grant camera permission when prompted
-- [ ] Confirm live view renders on the attract/capture screen
+- [x] Camera in USB Streaming mode, connected via data-capable USB-C cable
+- [x] App: USB Webcam (tested) → Connect
+- [x] Grant camera permission when prompted
+- [x] Confirm live view renders on the attract/capture screen — confirmed working 2026-07-15
 - [ ] Confirm capture works and the image lands correctly
 - [ ] Check resulting photo resolution/quality is print-usable
 - [ ] Confirm no hot-shoe flash fires on capture (expected — flag if this
@@ -87,10 +108,10 @@ Lightning port is a dead end regardless of adapter.
       feed, should work unchanged, worth confirming)
 - [ ] If all pass: merge `feature/multi-camera` → `main`, redeploy
 
-**Optional fallback, testable on iPhone today, no iPad needed:** camera's
-PC Remote Wi-Fi mode (Menu → Network → PC Remote Function) — if it uses
-standard PTP/IP (unconfirmed), the existing "Other PTP (beta)" brand might
-work through it. Capture-only, no live view either way.
+Note: the "Other PTP (beta)" fallback brand mentioned in earlier drafts of
+this doc has since been removed from the app (camera picker trimmed to
+Canon EOS + Sony's two paths — see the app changelog) — no longer an
+option if USB Streaming mode isn't available on a given body.
 
 ## Files touched
 
