@@ -171,6 +171,15 @@ private struct ConnectView: View {
                         .padding(.horizontal, 40)
                         .contentTransition(.opacity)
                         .animation(.easeOut(duration: 0.25), value: model.selectedBrand)
+
+                    // Only these two brands have zero live-view protocol —
+                    // the fallback is the one way to get any preview at
+                    // all, at a real cost (fires the shutter on a timer),
+                    // so it's opt-in and explained, never silently applied.
+                    if model.selectedBrand == .fujifilm || model.selectedBrand == .genericPTP {
+                        BurstPreviewToggle(isOn: $model.useBurstPreviewFallback)
+                            .padding(.horizontal, 24)
+                    }
                 }
                 .entrance(entered, delay: 0.1)
 
@@ -228,6 +237,34 @@ private struct ConnectView: View {
                 AdminView(model: model)
             }
         }
+    }
+}
+
+/// Opt-in toggle for BurstLiveViewCamera — only shown for brands with no
+/// real live-view protocol. Cost is spelled out inline, not buried in a
+/// tooltip, since it's a real one (shutter wear, flash strobing).
+private struct BurstPreviewToggle: View {
+    @Binding var isOn: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Rough preview fallback (beta)")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Chassis.textPrimary)
+                Spacer()
+                Toggle("", isOn: $isOn)
+                    .labelsHidden()
+                    .tint(Chassis.accent)
+            }
+            Text("Samples a real photo every ~2.5s instead of true live view — fires the shutter each frame (and a mounted flash, if any). Off by default; only worth it if some rough framing help matters more than shutter wear.")
+                .font(.caption2)
+                .foregroundStyle(Chassis.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Chassis.hairline, lineWidth: 1))
     }
 }
 
