@@ -20,14 +20,12 @@ public protocol TetheredCamera: Actor {
 }
 
 /// Guest-facing camera brand choice on the connect screen. Only Canon has
-/// been verified on hardware; the others are best-effort implementations
-/// of each vendor's documented PTP dialect, flagged as beta in the UI.
+/// been verified on hardware. Nikon/Fujifilm/generic-PTP support exists in
+/// CameraKit but is deliberately not offered here right now — pruned down
+/// to just the two brands actually in use/under test.
 public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
     case canonEOS
-    case nikon
     case sony
-    case fujifilm
-    case genericPTP
     case usbWebcam
 
     public var id: String { rawValue }
@@ -35,10 +33,7 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
     public var displayName: String {
         switch self {
         case .canonEOS: "Canon EOS"
-        case .nikon: "Nikon (beta)"
         case .sony: "Sony (beta)"
-        case .fujifilm: "Fujifilm (beta)"
-        case .genericPTP: "Other PTP (beta)"
         case .usbWebcam: "USB Webcam (beta)"
         }
     }
@@ -47,14 +42,8 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .canonEOS:
             "Camera in Remote control (EOS Utility) Wi-Fi mode."
-        case .nikon:
-            "Camera in Wi-Fi/tethering mode with PTP/IP enabled. Untested on hardware — expect rough edges."
         case .sony:
             "Camera in Control with Smartphone / Smart Remote mode, iPad joined to the camera's Wi-Fi. Uses Sony's Camera Remote API (older α and RX bodies only — newer bodies dropped this in favor of Creators' App). Untested on hardware."
-        case .fujifilm:
-            "Camera in wireless tethering mode. Uses standard PTP — capture works, live view doesn't. Untested on hardware."
-        case .genericPTP:
-            "Any PTP/IP camera. Capture only — live view isn't part of standard PTP, so the screen shows no feed."
         case .usbWebcam:
             "Camera in USB Streaming/webcam mode, wired to the iPad over USB-C (e.g. Sony a7 IV+ with firmware 5.0+: Menu → Setup → USB → USB Connection Mode → USB Streaming). No IP needed — just plug in and tap Connect. Live view AND capture both come from the video feed, not the shutter — no hot-shoe flash sync, and photo resolution is capped at the stream's resolution, not the sensor's full still resolution. Untested on hardware."
         }

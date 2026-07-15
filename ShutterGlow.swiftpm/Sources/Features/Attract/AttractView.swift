@@ -40,50 +40,26 @@ struct AttractView: View {
                 }
 
                 if hasPicker {
-                    VStack(spacing: 18) {
+                    VStack(spacing: 22) {
                         // Category tabs — switching shows only that
                         // category's options, nothing else stacks up.
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 10) {
-                                ForEach(categories, id: \.self) { category in
-                                    Button {
-                                        selectCategory(category)
-                                    } label: {
-                                        Text(category.rawValue)
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundStyle(selectedCategory == category ? Color.black : Chassis.textPrimary)
-                                            .padding(.vertical, 10)
-                                            .padding(.horizontal, 20)
-                                            .background(
-                                                Capsule().fill(selectedCategory == category
-                                                    ? AnyShapeStyle(Color.white)
-                                                    : AnyShapeStyle(.ultraThinMaterial))
-                                            )
-                                            .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
-                                    }
-                                    .buttonStyle(PressableStyle())
-                                }
-                            }
-                            .padding(.horizontal, 24)
+                        // ViewThatFits centers the row when it fits the
+                        // screen (the common iPad case) and only falls back
+                        // to a left-starting scroll when an event enables
+                        // enough categories to overflow.
+                        ViewThatFits(in: .horizontal) {
+                            categoryTabs
+                            ScrollView(.horizontal, showsIndicators: false) { categoryTabs }
                         }
                         .entrance(entered, delay: 0.05)
 
                         // Options slide in from the trailing edge when the
                         // category changes — reads as flipping to the next
-                        // page rather than content teleporting.
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 18) {
-                                categoryContent
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 6)
-                            .id(selectedCategory)
-                            .transition(
-                                .asymmetric(
-                                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                                    removal: .opacity
-                                )
-                            )
+                        // page rather than content teleporting. Same
+                        // fits-then-scrolls centering as the tabs above.
+                        ViewThatFits(in: .horizontal) {
+                            optionsRow
+                            ScrollView(.horizontal, showsIndicators: false) { optionsRow }
                         }
                         .animation(.spring(duration: 0.45, bounce: 0.12), value: selectedCategory)
                         .entrance(entered, delay: 0.1)
@@ -103,7 +79,8 @@ struct AttractView: View {
                         }
                         selectedMode = .single
                     }
-                    .padding(.top, 8)
+                    .scaleEffect(1.15)
+                    .padding(.top, 14)
                     .entrance(entered, delay: 0.16)
                 } else {
                     // Shutter-ring start control: outer hairline ring, accent
@@ -111,23 +88,23 @@ struct AttractView: View {
                     Button {
                         model.tapToStart()
                     } label: {
-                        VStack(spacing: 18) {
+                        VStack(spacing: 22) {
                             ZStack {
                                 Circle()
                                     .fill(.ultraThinMaterial)
                                 Circle()
                                     .strokeBorder(Chassis.hairline, lineWidth: 1)
                                 Circle()
-                                    .strokeBorder(.white.opacity(0.8), lineWidth: 3)
-                                    .padding(10)
+                                    .strokeBorder(.white.opacity(0.8), lineWidth: 4)
+                                    .padding(13)
                                 Circle()
                                     .fill(Chassis.textPrimary)
-                                    .padding(18)
+                                    .padding(24)
                             }
-                            .frame(width: 108, height: 108)
-                            .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
+                            .frame(width: 148, height: 148)
+                            .shadow(color: .black.opacity(0.5), radius: 16, y: 7)
 
-                            ChassisLabel(text: "Tap to Start")
+                            ChassisLabel(text: "Tap to Start", size: 13)
                         }
                     }
                     .buttonStyle(.plain)
@@ -163,6 +140,52 @@ struct AttractView: View {
         .sensoryFeedback(.selection, trigger: selectedCategory)
         .sensoryFeedback(.selection, trigger: model.selectedFilter)
         .sensoryFeedback(.selection, trigger: model.selectedProp)
+    }
+
+    // MARK: - Category tabs / options rows
+
+    /// Extracted so ViewThatFits above can measure/build the identical
+    /// content both bare (centers when it fits) and inside a ScrollView
+    /// (left-starting fallback when it doesn't) without duplicating markup.
+    @ViewBuilder
+    private var categoryTabs: some View {
+        HStack(spacing: 14) {
+            ForEach(categories, id: \.self) { category in
+                Button {
+                    selectCategory(category)
+                } label: {
+                    Text(category.rawValue)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(selectedCategory == category ? Color.black : Chassis.textPrimary)
+                        .padding(.vertical, 14)
+                        .padding(.horizontal, 26)
+                        .background(
+                            Capsule().fill(selectedCategory == category
+                                ? AnyShapeStyle(Color.white)
+                                : AnyShapeStyle(.ultraThinMaterial))
+                        )
+                        .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                }
+                .buttonStyle(PressableStyle())
+            }
+        }
+        .padding(.horizontal, 24)
+    }
+
+    @ViewBuilder
+    private var optionsRow: some View {
+        HStack(spacing: 22) {
+            categoryContent
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 6)
+        .id(selectedCategory)
+        .transition(
+            .asymmetric(
+                insertion: .move(edge: .trailing).combined(with: .opacity),
+                removal: .opacity
+            )
+        )
     }
 
     // MARK: - Category content

@@ -67,16 +67,10 @@ public final class BoothViewModel: ObservableObject {
 
     /// Attendant's camera-brand pick on the connect screen — persisted so
     /// one booth setup survives relaunches. Only Canon is hardware-verified;
-    /// Nikon/generic are best-effort beta dialects (see CameraBrand).
+    /// Sony (both variants) is under active test (see CameraBrand).
     @Published public var selectedBrand: CameraBrand = CameraBrand.loadSaved() {
         didSet { selectedBrand.save() }
     }
-
-    /// Only meaningful for brands with no real live-view protocol at all
-    /// (Fujifilm, generic PTP) — wraps the connected camera in
-    /// BurstLiveViewCamera when on. Off by default: it fires the actual
-    /// shutter on a timer, a real cost that shouldn't be silently applied.
-    @Published public var useBurstPreviewFallback = false
 
     private var transport: PTPIPTransport?
     private var camera: (any TetheredCamera)?
@@ -250,19 +244,10 @@ public final class BoothViewModel: ObservableObject {
 
         let wifiTransport = PTPIPTransport(host: cameraIPText)
         transport = wifiTransport
-        var cam: any TetheredCamera
+        let cam: any TetheredCamera
         switch selectedBrand {
         case .canonEOS: cam = EOSCamera(transport: wifiTransport)
-        case .nikon: cam = NikonCamera(transport: wifiTransport)
-        case .fujifilm, .genericPTP: cam = GenericPTPCamera(transport: wifiTransport)
         case .sony, .usbWebcam: return // handled above
-        }
-        // Fujifilm/generic PTP have no live-view protocol at all — the one
-        // case where the slow-sampled fallback adds real value over a
-        // permanently blank screen. Never applied to Canon/Nikon, which
-        // already have a real feed this would only make worse.
-        if useBurstPreviewFallback, selectedBrand == .fujifilm || selectedBrand == .genericPTP {
-            cam = BurstLiveViewCamera(wrapping: cam)
         }
         camera = cam
 

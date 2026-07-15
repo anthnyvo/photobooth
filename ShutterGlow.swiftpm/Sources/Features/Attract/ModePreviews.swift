@@ -13,17 +13,24 @@ struct ModePreviewCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
+            VStack(spacing: 14) {
                 ZStack {
+                    // Preview art is vector-drawn at its own fixed small
+                    // constants (see PhotoSwatch/StripPreview/etc.) — scale
+                    // it up to actually fill the enlarged card instead of
+                    // floating small in extra whitespace. Clipped so the
+                    // scaled content can't spill past the rounded corners.
                     art()
+                        .scaleEffect(1.35)
                 }
-                .frame(width: 96, height: 104)
+                .frame(width: 132, height: 142)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .fill(isSelected ? AnyShapeStyle(Color.white.opacity(0.16)) : AnyShapeStyle(.ultraThinMaterial))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
                         .strokeBorder(isSelected ? Color.white : Chassis.hairline, lineWidth: isSelected ? 2 : 1)
                 )
                 .shadow(color: .black.opacity(isSelected ? 0.45 : 0.25), radius: 10, y: 4)
@@ -33,7 +40,7 @@ struct ModePreviewCard: View {
                 .scaleEffect(isSelected ? 1.04 : 0.94)
                 .animation(.spring(duration: 0.35, bounce: 0.3), value: isSelected)
 
-                ChassisLabel(text: title, size: 10)
+                ChassisLabel(text: title, size: 13)
             }
         }
         .buttonStyle(PressableStyle())
