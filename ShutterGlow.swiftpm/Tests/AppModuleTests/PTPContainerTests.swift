@@ -114,7 +114,7 @@ final class PTPContainerTests: XCTestCase {
     func testCanonEventRecordParsingMultipleRecords() {
         var blob = Data()
         for i: UInt32 in 1...3 {
-            blob.appendLE(UInt32(12))
+            blob.appendLE(UInt32(9)) // 8-byte header + 1-byte payload
             blob.appendLE(i)
             blob.append(Data([UInt8(i)]))
         }
