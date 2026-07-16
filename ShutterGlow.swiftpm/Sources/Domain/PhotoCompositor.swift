@@ -1,10 +1,85 @@
 import UIKit
+import CoreImage
+import CoreVideo
+import Vision
 
 /// All pixel-level photo compositing — burning a branded overlay/frame onto
 /// the final file (not just showing it in the UI) and stacking multiple
 /// shots into a single strip image. Both operate on raw JPEG Data in/out so
 /// callers (BoothViewModel) never need to touch UIImage/UIGraphics directly.
 enum PhotoCompositor {
+    /// Shared Core Image context — same reasoning as PhotoFilter's: building a
+    /// CIContext per capture is the expensive part.
+    private static let ciContext = CIContext()
+
+    /// Green-screen without a green screen: Vision segments the person out of
+    /// the shot on-device and composites them over the event's chosen backdrop
+    /// image (aspect-filled to the frame). Returns the original bytes unchanged
+    /// if disabled, the backdrop is missing, or segmentation fails — callers
+    /// use the result without checking. Nothing leaves the device.
+    static func replaceBackground(to photoData: Data, config: EventConfig) -> Data {
+        guard config.backgroundReplace.enabled,
+              let assetName = config.backgroundReplace.backdropAssetName,
+              let base = UIImage(data: photoData)?.downscaled(maxWidth: 1600),
+              let baseCG = base.cgImage else {
+            return photoData
+        }
+        let backdropURL = EventStorage.shared.assetURL(eventId: config.eventId, filename: assetName)
+        guard let backdrop = UIImage(contentsOfFile: backdropURL.path),
+              let backdropCG = backdrop.croppedToAspectFill(base.size).cgImage else {
+            return photoData
+        }
+
+        let request = VNGeneratePersonSegmentationRequest()
+        request.qualityLevel = .balanced
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent8
+        let handler = VNImageRequestHandler(cgImage: baseCG, options: [:])
+        guard (try? handler.perform([request])) != nil,
+              let maskBuffer = request.results?.first?.pixelBuffer else {
+            return photoData
+        }
+
+        let ciBase = CIImage(cgImage: baseCG)
+        var ciMask = CIImage(cvPixelBuffer: maskBuffer)
+        // The segmentation mask comes back at its own resolution; scale it to
+        // cover the base image exactly before using it as the blend mask.
+        let scaleX = ciBase.extent.width / ciMask.extent.width
+        let scaleY = ciBase.extent.height / ciMask.extent.height
+        ciMask = ciMask.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        let ciBackdrop = CIImage(cgImage: backdropCG)
+
+        guard let blend = CIFilter(name: "CIBlendWithMask") else { return photoData }
+        blend.setValue(ciBase, forKey: kCIInputImageKey)              // person (kept where mask is white)
+        blend.setValue(ciBackdrop, forKey: kCIInputBackgroundImageKey) // new background
+        blend.setValue(ciMask, forKey: kCIInputMaskImageKey)
+        guard let output = blend.outputImage,
+              let rendered = ciContext.createCGImage(output, from: ciBase.extent) else {
+            return photoData
+        }
+        return UIImage(cgImage: rendered).jpegData(compressionQuality: 0.92) ?? photoData
+    }
+
+    /// Composites one guest-chosen sticker overlay (a transparent PNG in the
+    /// event's assets/) full-frame onto the photo — same draw approach as
+    /// applyOverlay, but for a per-guest pick from the sticker set rather than
+    /// the single fixed event overlay. No-op if disabled or asset missing.
+    static func applySticker(_ assetName: String?, to photoData: Data, config: EventConfig) -> Data {
+        guard config.stickers.enabled,
+              let assetName,
+              let base = UIImage(data: photoData)?.downscaled(maxWidth: 1600) else {
+            return photoData
+        }
+        let url = EventStorage.shared.assetURL(eventId: config.eventId, filename: assetName)
+        guard let sticker = UIImage(contentsOfFile: url.path) else { return photoData }
+
+        let renderer = UIGraphicsImageRenderer(size: base.size, format: .pixelExact)
+        let composited = renderer.image { _ in
+            base.draw(in: CGRect(origin: .zero, size: base.size))
+            sticker.draw(in: CGRect(origin: .zero, size: base.size))
+        }
+        return composited.jpegData(compressionQuality: 0.92) ?? photoData
+    }
+
     /// Draws the event's overlay asset (if enabled and present) over the
     /// base photo, scaled to fill the base image's exact size, and
     /// re-encodes to JPEG. Returns the original bytes unchanged if overlay

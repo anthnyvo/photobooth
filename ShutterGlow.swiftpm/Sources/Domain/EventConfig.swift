@@ -157,6 +157,86 @@ public struct EventConfig: Codable, Sendable, Equatable {
         public static let `default` = AIOptions()
     }
 
+    /// On-device background replacement (green screen): Vision person
+    /// segmentation masks the guest and composites them over `backdropAssetName`
+    /// (a full-bleed image in the event's assets/ folder). Runs entirely on
+    /// the iPad — no green physical backdrop and no cloud, consistent with the
+    /// "nothing leaves the device" story.
+    public struct BackgroundReplaceOptions: Codable, Sendable, Equatable {
+        public var enabled: Bool
+        public var backdropAssetName: String?
+
+        public init(enabled: Bool = false, backdropAssetName: String? = nil) {
+            self.enabled = enabled
+            self.backdropAssetName = backdropAssetName
+        }
+
+        public static let `default` = BackgroundReplaceOptions()
+    }
+
+    /// A "glam" beauty pass (skin smoothing + brighten + gentle warmth),
+    /// offered as one more guest-selectable filter chip when enabled. The
+    /// choice is per-guest like the other filters; this only controls whether
+    /// the chip is offered at all.
+    public struct GlamOptions: Codable, Sendable, Equatable {
+        public var enabled: Bool
+
+        public init(enabled: Bool = false) {
+            self.enabled = enabled
+        }
+
+        public static let `default` = GlamOptions()
+    }
+
+    /// Lead / survey capture: an optional form shown before the guest gets
+    /// their photos, so the operator collects opt-in marketing contacts.
+    /// Leads are stored LOCALLY per event (Events/<id>/leads.json) and
+    /// exported by the attendant — never auto-uploaded, matching the
+    /// local-first, consent-first posture.
+    public struct DataCaptureOptions: Codable, Sendable, Equatable {
+        public var enabled: Bool
+        public var collectName: Bool
+        public var collectEmail: Bool
+        public var collectPhone: Bool
+        /// Consent line shown above the form (e.g. "Yes, email me offers").
+        /// Empty = no explicit marketing-consent checkbox, just contact fields.
+        public var consentText: String
+
+        public init(
+            enabled: Bool = false,
+            collectName: Bool = true,
+            collectEmail: Bool = true,
+            collectPhone: Bool = false,
+            consentText: String = ""
+        ) {
+            self.enabled = enabled
+            self.collectName = collectName
+            self.collectEmail = collectEmail
+            self.collectPhone = collectPhone
+            self.consentText = consentText
+        }
+
+        public static let `default` = DataCaptureOptions()
+    }
+
+    /// Guest-selectable decorative sticker overlays. Each event ships a set of
+    /// transparent PNGs in assets/; the guest picks one at the attract screen
+    /// (like a filter) and it's composited full-frame onto the final photo.
+    /// Distinct from `overlay` (a single fixed event frame) — this is a
+    /// choose-your-own set, the digital-props idea.
+    public struct StickerOptions: Codable, Sendable, Equatable {
+        public var enabled: Bool
+        /// Filenames in the event's assets/ folder, in offer order.
+        public var assetNames: [String]
+
+        public init(enabled: Bool = false, assetNames: [String] = []) {
+            self.enabled = enabled
+            self.assetNames = assetNames
+        }
+
+        public static let `default` = StickerOptions()
+    }
+
     public var eventId: String
     public var displayName: String
     public var branding: BrandingMode
@@ -185,6 +265,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// a single shot has no between-poses story to tell.
     public var timelapseEnabled: Bool
     public var ai: AIOptions
+    public var backgroundReplace: BackgroundReplaceOptions
+    public var glam: GlamOptions
+    public var dataCapture: DataCaptureOptions
+    public var stickers: StickerOptions
     /// True for an event mirrored down by RemoteSync from the shared
     /// backend — lets a later sync tell "this event was deleted on the
     /// dashboard, remove it here too" apart from an attendant's own
@@ -208,6 +292,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
         animationsEnabled: Bool = true,
         timelapseEnabled: Bool = false,
         ai: AIOptions = AIOptions(),
+        backgroundReplace: BackgroundReplaceOptions = BackgroundReplaceOptions(),
+        glam: GlamOptions = GlamOptions(),
+        dataCapture: DataCaptureOptions = DataCaptureOptions(),
+        stickers: StickerOptions = StickerOptions(),
         isRemote: Bool = false,
         createdAt: Date = Date()
     ) {
@@ -226,6 +314,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
         self.animationsEnabled = animationsEnabled
         self.timelapseEnabled = timelapseEnabled
         self.ai = ai
+        self.backgroundReplace = backgroundReplace
+        self.glam = glam
+        self.dataCapture = dataCapture
+        self.stickers = stickers
         self.isRemote = isRemote
         self.createdAt = createdAt
     }
@@ -243,7 +335,8 @@ public struct EventConfig: Codable, Sendable, Equatable {
     /// still load instead of crashing the booth on launch.
     private enum CodingKeys: String, CodingKey {
         case eventId, displayName, branding, colors, logoAssetName, countdownSeconds
-        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, timelapseEnabled, ai, isRemote, createdAt
+        case share, print, overlay, strip, squareCrop, filtersEnabled, animationsEnabled, timelapseEnabled, ai
+        case backgroundReplace, glam, dataCapture, stickers, isRemote, createdAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -263,6 +356,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
         animationsEnabled = try container.decodeIfPresent(Bool.self, forKey: .animationsEnabled) ?? true
         timelapseEnabled = try container.decodeIfPresent(Bool.self, forKey: .timelapseEnabled) ?? false
         ai = try container.decodeIfPresent(AIOptions.self, forKey: .ai) ?? .default
+        backgroundReplace = try container.decodeIfPresent(BackgroundReplaceOptions.self, forKey: .backgroundReplace) ?? .default
+        glam = try container.decodeIfPresent(GlamOptions.self, forKey: .glam) ?? .default
+        dataCapture = try container.decodeIfPresent(DataCaptureOptions.self, forKey: .dataCapture) ?? .default
+        stickers = try container.decodeIfPresent(StickerOptions.self, forKey: .stickers) ?? .default
         isRemote = try container.decodeIfPresent(Bool.self, forKey: .isRemote) ?? false
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
@@ -284,6 +381,10 @@ public struct EventConfig: Codable, Sendable, Equatable {
         try container.encode(animationsEnabled, forKey: .animationsEnabled)
         try container.encode(timelapseEnabled, forKey: .timelapseEnabled)
         try container.encode(ai, forKey: .ai)
+        try container.encode(backgroundReplace, forKey: .backgroundReplace)
+        try container.encode(glam, forKey: .glam)
+        try container.encode(dataCapture, forKey: .dataCapture)
+        try container.encode(stickers, forKey: .stickers)
         try container.encode(isRemote, forKey: .isRemote)
         try container.encode(createdAt, forKey: .createdAt)
     }

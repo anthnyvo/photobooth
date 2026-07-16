@@ -51,9 +51,26 @@ struct AdminView: View {
     @State private var logoData: Data?
     @State private var selectedOverlay: PhotosPickerItem?
     @State private var overlayData: Data?
+    @State private var glamEnabled = false
+    @State private var bgReplaceEnabled = false
+    @State private var selectedBackdrop: PhotosPickerItem?
+    @State private var backdropData: Data?
+    @State private var stickersEnabled = false
+    @State private var selectedStickers: [PhotosPickerItem] = []
+    @State private var stickerDatas: [Data] = []
+    /// Sticker asset filenames already saved for this event (edit mode); kept
+    /// when the attendant doesn't re-pick a new set.
+    @State private var existingStickerNames: [String] = []
+    @State private var dataCaptureEnabled = false
+    @State private var dcName = true
+    @State private var dcEmail = true
+    @State private var dcPhone = false
+    @State private var dcConsent = ""
     @State private var saveMessage: String?
     @State private var showingDeleteConfirm = false
     @State private var showingExport = false
+    @State private var showingLeadExport = false
+    @State private var leadExportURL: URL?
     @State private var currentPINEntry = ""
     @State private var newPINEntry = ""
     @State private var pinMessage: String?
@@ -158,6 +175,65 @@ struct AdminView: View {
                             subtitle: "The countdown starts automatically when someone smiles on the pose screen. All detection runs on this iPad — nothing is uploaded.",
                             isOn: $aiSmileShutter
                         )
+                        GlassToggle(
+                            title: "Glam filter",
+                            subtitle: "Adds a beauty-pass chip (skin smoothing + brighten) to the guest filter picker. Runs on-device.",
+                            isOn: $glamEnabled
+                        )
+                    }
+
+                    SetupCard(title: "Background Replace") {
+                        GlassToggle(
+                            title: "Replace background (green screen)",
+                            subtitle: "Segments the guest on-device and drops them onto a backdrop image — no green screen needed, nothing uploaded.",
+                            isOn: $bgReplaceEnabled
+                        )
+                        if bgReplaceEnabled {
+                            PhotosPicker(selection: $selectedBackdrop, matching: .images) {
+                                GlassActionLabel(icon: "photo.artframe", title: "Choose backdrop image")
+                            }
+                            if let backdropData, let uiImage = UIImage(data: backdropData) {
+                                Image(uiImage: uiImage)
+                                    .resizable().scaledToFit().frame(height: 80).frame(maxWidth: .infinity)
+                            } else if backdropAlreadySet {
+                                FootnoteText("A backdrop is already set for this event. Pick a new image to replace it.")
+                            }
+                            FootnoteText("Use a full-bleed image at roughly the photo's aspect ratio for the cleanest fill.")
+                        }
+                    }
+
+                    SetupCard(title: "Stickers") {
+                        GlassToggle(
+                            title: "Guest-selectable stickers",
+                            subtitle: "Offers a set of decorative overlays guests can pick at the start screen, burned onto their photo.",
+                            isOn: $stickersEnabled
+                        )
+                        if stickersEnabled {
+                            PhotosPicker(selection: $selectedStickers, maxSelectionCount: 6, matching: .images) {
+                                GlassActionLabel(icon: "face.smiling", title: "Choose sticker images (up to 6)")
+                            }
+                            if !stickerDatas.isEmpty {
+                                FootnoteText("\(stickerDatas.count) sticker\(stickerDatas.count == 1 ? "" : "s") selected.")
+                            } else if !existingStickerNames.isEmpty {
+                                FootnoteText("\(existingStickerNames.count) sticker\(existingStickerNames.count == 1 ? "" : "s") already set. Pick new images to replace the set.")
+                            }
+                            FootnoteText("Use transparent PNGs sized to the whole frame.")
+                        }
+                    }
+
+                    SetupCard(title: "Data Capture") {
+                        GlassToggle(
+                            title: "Collect guest details",
+                            subtitle: "Shows a short form before guests get their photos. Leads are stored on this iPad and exported by you — never auto-uploaded.",
+                            isOn: $dataCaptureEnabled
+                        )
+                        if dataCaptureEnabled {
+                            GlassToggle(title: "Ask for name", isOn: $dcName)
+                            GlassToggle(title: "Ask for email", isOn: $dcEmail)
+                            GlassToggle(title: "Ask for phone", isOn: $dcPhone)
+                            GlassField(label: "Marketing consent line (optional)", text: $dcConsent)
+                            FootnoteText("If set, a consent checkbox with this text shows on the form and is recorded per lead.")
+                        }
                     }
 
                     SetupCard(title: "Overlay / Frame") {
@@ -292,6 +368,20 @@ struct AdminView: View {
         .onChange(of: selectedLogo) { _, item in
             Task { logoData = try? await item?.loadTransferable(type: Data.self) }
         }
+        .onChange(of: selectedBackdrop) { _, item in
+            Task { backdropData = try? await item?.loadTransferable(type: Data.self) }
+        }
+        .onChange(of: selectedStickers) { _, items in
+            Task {
+                var loaded: [Data] = []
+                for item in items {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        loaded.append(data)
+                    }
+                }
+                stickerDatas = loaded
+            }
+        }
         .onChange(of: selectedOverlay) { _, item in
             Task { overlayData = try? await item?.loadTransferable(type: Data.self) }
         }
@@ -310,6 +400,11 @@ struct AdminView: View {
         }
         .sheet(isPresented: $showingExport) {
             PhotoExportSheet(photoURLs: EventStorage.shared.listPhotos(eventId: model.config.eventId))
+        }
+        .sheet(isPresented: $showingLeadExport) {
+            if let leadExportURL {
+                PhotoExportSheet(photoURLs: [leadExportURL])
+            }
         }
     }
 
@@ -359,6 +454,7 @@ struct AdminView: View {
         let photos = EventStorage.shared.listPhotos(eventId: activeId).count
         let prints = EventStorage.shared.printCount(eventId: activeId)
         let guests = EventStorage.shared.guestSessionCount(eventId: activeId)
+        let leads = EventStorage.shared.leadCount(eventId: activeId)
         let storageGB = EventStorage.shared.remainingCapacityGB()
 
         return SetupCard(title: "Status") {
@@ -366,6 +462,7 @@ struct AdminView: View {
                 StatTile(value: "\(photos)", label: "Photos")
                 StatTile(value: "\(prints)", label: "Prints")
                 StatTile(value: "\(guests)", label: "Guests")
+                StatTile(value: "\(leads)", label: "Leads")
                 StatTile(value: cameraConnected ? "On" : "Off", label: "Camera", accent: cameraConnected)
                 StatTile(value: model.cameraBatteryLevel.map { "\($0)" } ?? "—", label: "Battery")
                 StatTile(value: storageGB.map { String(format: "%.0f GB", $0) } ?? "—", label: "Free")
@@ -378,7 +475,27 @@ struct AdminView: View {
             .buttonStyle(.plain)
             .disabled(photos == 0)
             .opacity(photos == 0 ? 0.4 : 1)
+
+            Button {
+                exportLeads()
+            } label: {
+                GlassActionLabel(icon: "person.text.rectangle", title: "Export Leads (\(leads))")
+            }
+            .buttonStyle(.plain)
+            .disabled(leads == 0)
+            .opacity(leads == 0 ? 0.4 : 1)
         }
+    }
+
+    /// Writes the event's collected leads to a temp CSV and opens the share
+    /// sheet so the attendant can email/AirDrop the list off the device.
+    private func exportLeads() {
+        let csv = EventStorage.shared.leadsCSV(eventId: model.config.eventId)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("leads-\(model.config.eventId).csv")
+        guard (try? csv.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        leadExportURL = url
+        showingLeadExport = true
     }
 
     private var cameraConnected: Bool {
@@ -414,6 +531,21 @@ struct AdminView: View {
         aiProps = current.ai.props
         aiSmileShutter = current.ai.smileShutter
         timelapseEnabled = current.timelapseEnabled
+        glamEnabled = current.glam.enabled
+        bgReplaceEnabled = current.backgroundReplace.enabled
+        stickersEnabled = current.stickers.enabled
+        existingStickerNames = current.stickers.assetNames
+        dataCaptureEnabled = current.dataCapture.enabled
+        dcName = current.dataCapture.collectName
+        dcEmail = current.dataCapture.collectEmail
+        dcPhone = current.dataCapture.collectPhone
+        dcConsent = current.dataCapture.consentText
+    }
+
+    /// True when the event already has a backdrop asset saved (edit mode) so
+    /// the UI can say "already set" instead of showing nothing.
+    private var backdropAlreadySet: Bool {
+        model.config.backgroundReplace.backdropAssetName != nil
     }
 
     private func changePIN() {
@@ -438,6 +570,14 @@ struct AdminView: View {
         // it — that function also sanitizes defensively, but doing it here
         // too avoids a raw-vs-sanitized display mismatch for a new event.
         eventId = EventStorage.sanitizeEventId(eventId)
+        // A backdrop is present if one was just picked or already exists on
+        // this event; only then is it worth pointing the config at the file.
+        let hasBackdrop = backdropData != nil || model.config.backgroundReplace.backdropAssetName != nil
+        // New sticker set if re-picked this session; otherwise keep the saved
+        // filenames (edit mode, files already on disk).
+        let stickerNames: [String] = !stickerDatas.isEmpty
+            ? stickerDatas.indices.map { "sticker_\($0).png" }
+            : existingStickerNames
         var config = EventConfig(
             eventId: eventId,
             displayName: displayName,
@@ -456,7 +596,20 @@ struct AdminView: View {
             filtersEnabled: filtersEnabled,
             animationsEnabled: animationsEnabled,
             timelapseEnabled: timelapseEnabled,
-            ai: .init(props: aiProps, smileShutter: aiSmileShutter)
+            ai: .init(props: aiProps, smileShutter: aiSmileShutter),
+            backgroundReplace: .init(
+                enabled: bgReplaceEnabled,
+                backdropAssetName: (bgReplaceEnabled && hasBackdrop) ? "backdrop.png" : nil
+            ),
+            glam: .init(enabled: glamEnabled),
+            dataCapture: .init(
+                enabled: dataCaptureEnabled,
+                collectName: dcName,
+                collectEmail: dcEmail,
+                collectPhone: dcPhone,
+                consentText: dcConsent.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
+            stickers: .init(enabled: stickersEnabled, assetNames: stickersEnabled ? stickerNames : [])
         )
         // The form doesn't carry every field. When EDITING, rebuilding from
         // scratch would silently reset the ones it omits: isRemote (→ false,
@@ -482,6 +635,14 @@ struct AdminView: View {
             }
             if overlayEnabled, let overlayData {
                 _ = try EventStorage.shared.importLogoData(overlayData, eventId: eventId, filename: "overlay.png")
+            }
+            if bgReplaceEnabled, let backdropData {
+                _ = try EventStorage.shared.importLogoData(backdropData, eventId: eventId, filename: "backdrop.png")
+            }
+            if stickersEnabled, !stickerDatas.isEmpty {
+                for (index, data) in stickerDatas.enumerated() {
+                    _ = try EventStorage.shared.importLogoData(data, eventId: eventId, filename: "sticker_\(index).png")
+                }
             }
             model.reloadConfig()
             saveMessage = "Saved — will load on next connect"

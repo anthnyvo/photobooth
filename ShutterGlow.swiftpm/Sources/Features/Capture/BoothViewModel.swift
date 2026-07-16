@@ -53,6 +53,12 @@ public final class BoothViewModel: ObservableObject {
     /// faces and burned into the file in finishCapture (or per frame for
     /// Boomerang/GIF). Resets per guest, same as selectedFilter.
     @Published public var selectedProp: PhotoProp = .none
+    /// Guest's decorative-sticker pick (a filename from config.stickers), or
+    /// nil for none. Composited full-frame in finishCapture. Resets per guest.
+    @Published public var selectedSticker: String?
+    /// True once this guest has filled (or skipped) the data-capture form, so
+    /// the share screen doesn't re-prompt them. Resets per guest.
+    @Published public var leadCollectedThisSession = false
     /// Transparent props-only frame matching the live view's pixel aspect —
     /// rendered a few times a second by runLivePropOverlayLoop(). Stored on
     /// liveFeed (per-frame churn, same reasoning as liveViewImage).
@@ -598,15 +604,17 @@ public final class BoothViewModel: ObservableObject {
         let currentLayout = sessionLayout
         let currentFilter = selectedFilter
         let currentProp = selectedProp
+        let currentSticker = selectedSticker
         Task {
             let branded = await Task.detached(priority: .userInitiated) {
-                // Props and the filter both go on per shot, BEFORE
-                // compositing: faces are at their largest in the raw frame
-                // (props anchor correctly per strip cell), and filtering
-                // per shot keeps the strip's white gutters and the Polaroid
-                // stock clean white instead of sepia-tinted paper.
+                // Per shot, BEFORE compositing: background replace first (the
+                // person is largest/cleanest in the raw frame, best for
+                // segmentation), then face props anchor onto that, then the
+                // colour filter. Filtering per shot keeps the strip's white
+                // gutters and the Polaroid stock clean, not tinted.
                 let processedShots = shots.map { shot in
                     var processed = shot
+                    processed = PhotoCompositor.replaceBackground(to: processed, config: currentConfig)
                     if currentProp != .none {
                         processed = FacePropRenderer.apply(currentProp, to: processed)
                     }
@@ -624,7 +632,10 @@ public final class BoothViewModel: ObservableObject {
                 if currentConfig.squareCrop {
                     composited = PhotoCompositor.applySquareCrop(to: composited)
                 }
-                let branded = PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+                // Event overlay, then the guest's chosen sticker, then the
+                // Polaroid frame last so the border wraps everything.
+                var branded = PhotoCompositor.applyOverlay(to: composited, config: currentConfig)
+                branded = PhotoCompositor.applySticker(currentSticker, to: branded, config: currentConfig)
                 return PhotoCompositor.addPolaroidFrame(to: branded)
             }.value
             do {
@@ -653,6 +664,16 @@ public final class BoothViewModel: ObservableObject {
         step = .sharing(url)
     }
 
+    /// Records an opt-in lead from the data-capture form (stored locally per
+    /// event; never auto-uploaded) and marks this guest handled either way.
+    /// An empty lead (guest skipped) just sets the flag.
+    public func submitLead(_ lead: EventStorage.GuestLead?) {
+        if let lead, !(lead.name.isEmpty && lead.email.isEmpty && lead.phone.isEmpty) {
+            EventStorage.shared.appendLead(lead, eventId: config.eventId)
+        }
+        leadCollectedThisSession = true
+    }
+
     /// Called from the share screen once the guest is done (or after a
     /// timeout) — back to idle, auto-return after a short delay handled by
     /// the view itself calling this on a timer.
@@ -660,6 +681,8 @@ public final class BoothViewModel: ObservableObject {
         liveViewImage = liveViewImage // keep last frame visible during transition
         selectedFilter = .none
         selectedProp = .none
+        selectedSticker = nil
+        leadCollectedThisSession = false
         livePropOverlay = nil
         timelapseURL = nil
         step = .attract

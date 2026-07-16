@@ -193,6 +193,20 @@ public enum RemoteSync {
                 smileShutter: config.liveViewSettings.smileShutter ?? false
             )
             local.timelapseEnabled = config.liveViewSettings.timelapseEnabled ?? false
+            // Glam + data-capture: pure settings, safe to sync. Preserve the
+            // existing local value when the key is absent (older dashboard
+            // rows) rather than resetting. Background-replace/stickers are
+            // intentionally NOT synced — they depend on on-device assets.
+            local.glam = EventConfig.GlamOptions(
+                enabled: config.liveViewSettings.glamEnabled ?? local.glam.enabled
+            )
+            local.dataCapture = EventConfig.DataCaptureOptions(
+                enabled: config.liveViewSettings.dataCaptureEnabled ?? local.dataCapture.enabled,
+                collectName: config.liveViewSettings.dataCaptureName ?? local.dataCapture.collectName,
+                collectEmail: config.liveViewSettings.dataCaptureEmail ?? local.dataCapture.collectEmail,
+                collectPhone: config.liveViewSettings.dataCapturePhone ?? local.dataCapture.collectPhone,
+                consentText: config.liveViewSettings.dataCaptureConsentText ?? local.dataCapture.consentText
+            )
             // Print/share were previously local-only (set from this app's
             // own Admin screen with no dashboard equivalent, despite the
             // web docs implying otherwise) — the dashboard config form now
@@ -299,6 +313,16 @@ public enum RemoteSync {
             let shareAirdrop: Bool?
             let shareQrGallery: Bool?
             let shareEmail: Bool?
+            // Newer feature flags — pure settings that sync cleanly from the
+            // dashboard. Background-replace and stickers aren't here: they
+            // need asset files (backdrop/sticker PNGs) that are picked
+            // on-device in the Admin screen, not sent through this jsonb.
+            let glamEnabled: Bool?
+            let dataCaptureEnabled: Bool?
+            let dataCaptureName: Bool?
+            let dataCaptureEmail: Bool?
+            let dataCapturePhone: Bool?
+            let dataCaptureConsentText: String?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
@@ -316,6 +340,12 @@ public enum RemoteSync {
                 case shareAirdrop = "share_airdrop"
                 case shareQrGallery = "share_qr_gallery"
                 case shareEmail = "share_email"
+                case glamEnabled = "glam_enabled"
+                case dataCaptureEnabled = "data_capture_enabled"
+                case dataCaptureName = "data_capture_name"
+                case dataCaptureEmail = "data_capture_email"
+                case dataCapturePhone = "data_capture_phone"
+                case dataCaptureConsentText = "data_capture_consent_text"
             }
         }
     }

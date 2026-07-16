@@ -204,7 +204,7 @@ struct AttractView: View {
                 }
             }
         case .filters:
-            ForEach(PhotoFilter.allCases) { filter in
+            ForEach(PhotoFilter.offered(glamEnabled: model.config.glam.enabled)) { filter in
                 ModePreviewCard(
                     title: filter.displayName,
                     isSelected: model.selectedFilter == filter,
@@ -223,7 +223,31 @@ struct AttractView: View {
                     AnyView(PropPreview(prop: prop))
                 }
             }
+        case .stickers:
+            // "None" chip first, then one per event sticker asset.
+            ModePreviewCard(
+                title: "None",
+                isSelected: model.selectedSticker == nil,
+                action: { model.selectedSticker = nil }
+            ) {
+                AnyView(Color.black.opacity(0.2))
+            }
+            ForEach(model.config.stickers.assetNames, id: \.self) { name in
+                ModePreviewCard(
+                    title: stickerLabel(name),
+                    isSelected: model.selectedSticker == name,
+                    action: { model.selectedSticker = name }
+                ) {
+                    AnyView(StickerPreview(eventId: model.config.eventId, assetName: name))
+                }
+            }
         }
+    }
+
+    /// Human-ish label from a sticker filename ("hearts.png" -> "Hearts").
+    private func stickerLabel(_ filename: String) -> String {
+        let base = (filename as NSString).deletingPathExtension
+        return base.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
     /// Every offered (shot count, layout) combination — e.g. 3-shot and
@@ -245,6 +269,9 @@ struct AttractView: View {
         if model.config.animationsEnabled { result.append(.animated) }
         if model.config.filtersEnabled { result.append(.filters) }
         if model.config.ai.props { result.append(.props) }
+        if model.config.stickers.enabled && !model.config.stickers.assetNames.isEmpty {
+            result.append(.stickers)
+        }
         return result
     }
 
@@ -253,7 +280,7 @@ struct AttractView: View {
         case .photo: [.single]
         case .strips: stripOptions.map(Mode.strip)
         case .animated: AnimatedStyle.allCases.map(Mode.animated)
-        case .filters, .props: []
+        case .filters, .props, .stickers: []
         }
     }
 
@@ -292,6 +319,7 @@ struct AttractView: View {
         case animated = "Animated"
         case filters = "Filters"
         case props = "Props"
+        case stickers = "Stickers"
     }
 
     private enum Mode: Hashable {

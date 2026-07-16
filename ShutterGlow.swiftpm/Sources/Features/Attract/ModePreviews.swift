@@ -378,3 +378,26 @@ struct AnimatedPreview: View {
         }
     }
 }
+
+/// Sticker preview: the actual sticker PNG from the event's assets, shown
+/// small over a neutral card so the guest sees what they're choosing.
+struct StickerPreview: View {
+    let eventId: String
+    let assetName: String
+
+    var body: some View {
+        let url = EventStorage.shared.assetURL(eventId: eventId, filename: assetName)
+        ZStack {
+            PhotoSwatch().aspectRatio(4 / 3, contentMode: .fit)
+            if let image = UIImage(contentsOfFile: url.path) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(4)
+            }
+        }
+        .frame(width: 56, height: 48)
+        .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.white))
+        .shadow(color: .black.opacity(0.35), radius: 4, y: 2)
+    }
+}

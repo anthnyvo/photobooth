@@ -195,6 +195,63 @@ public final class EventStorage {
         UserDefaults.standard.integer(forKey: guestSessionCountKey(eventId))
     }
 
+    // MARK: - Lead capture
+
+    /// One opt-in contact collected via the data-capture form. Stored LOCALLY
+    /// in the event folder (Events/<id>/leads.json) and exported by the
+    /// attendant — never auto-uploaded, matching the local-first posture.
+    public struct GuestLead: Codable, Sendable, Equatable {
+        public var name: String
+        public var email: String
+        public var phone: String
+        public var consented: Bool
+        public var capturedAt: Date
+
+        public init(name: String = "", email: String = "", phone: String = "", consented: Bool = false, capturedAt: Date = Date()) {
+            self.name = name
+            self.email = email
+            self.phone = phone
+            self.consented = consented
+            self.capturedAt = capturedAt
+        }
+    }
+
+    private func leadsURL(_ eventId: String) -> URL {
+        eventDirectory(eventId).appendingPathComponent("leads.json")
+    }
+
+    public func appendLead(_ lead: GuestLead, eventId: String) {
+        var leads = loadLeads(eventId: eventId)
+        leads.append(lead)
+        guard let data = try? JSONEncoder().encode(leads) else { return }
+        try? data.write(to: leadsURL(eventId), options: .atomic)
+    }
+
+    public func loadLeads(eventId: String) -> [GuestLead] {
+        guard let data = try? Data(contentsOf: leadsURL(eventId)) else { return [] }
+        return (try? JSONDecoder().decode([GuestLead].self, from: data)) ?? []
+    }
+
+    /// Spreadsheet-ready export of the collected leads for this event.
+    public func leadsCSV(eventId: String) -> String {
+        func esc(_ s: String) -> String {
+            "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+        }
+        let iso = ISO8601DateFormatter()
+        var rows = ["Name,Email,Phone,Consented,CapturedAt"]
+        for lead in loadLeads(eventId: eventId) {
+            rows.append([
+                esc(lead.name), esc(lead.email), esc(lead.phone),
+                lead.consented ? "yes" : "no", iso.string(from: lead.capturedAt)
+            ].joined(separator: ","))
+        }
+        return rows.joined(separator: "\n")
+    }
+
+    public func leadCount(eventId: String) -> Int {
+        loadLeads(eventId: eventId).count
+    }
+
     private func printCountKey(_ eventId: String) -> String {
         "com.anthonyvo.photobooth.printCount.\(eventId)"
     }

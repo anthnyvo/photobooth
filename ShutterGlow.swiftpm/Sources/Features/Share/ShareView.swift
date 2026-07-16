@@ -14,6 +14,7 @@ struct ShareView: View {
     @State private var qrError: String?
     @State private var showingQR = false
     @State private var showingMail = false
+    @State private var showingDataCapture = false
     /// Scoped to this one guest's turn — this view is freshly created per
     /// BoothStep.sharing(url), so a plain @State counter is already exactly
     /// "prints used this session," no BoothViewModel bookkeeping needed.
@@ -118,7 +119,26 @@ struct ShareView: View {
         }
         .onAppear {
             entered = true
+            // Gate the share screen behind the lead form when the event
+            // collects data and this guest hasn't been prompted yet. The
+            // auto-return timer is paused while the form is up (below).
+            if model.config.dataCapture.enabled && !model.leadCollectedThisSession {
+                showingDataCapture = true
+            } else {
+                model.scheduleAutoReturn()
+            }
+        }
+        .sheet(isPresented: $showingDataCapture, onDismiss: {
             model.scheduleAutoReturn()
+        }) {
+            DataCaptureView(options: model.config.dataCapture) { lead in
+                model.submitLead(lead)
+                showingDataCapture = false
+            }
+            .interactiveDismissDisabled(true)
+        }
+        .onChange(of: showingDataCapture) { _, open in
+            if open { model.cancelAutoReturn() }
         }
         .sheet(isPresented: $showingQR) {
             QRShareSheet(image: qrImage, url: qrURL, error: qrError)
