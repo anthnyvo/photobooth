@@ -22,9 +22,21 @@ jobs:
       - name: Run unit tests
         working-directory: ShutterGlow.swiftpm
         run: |
+          # Don't hardcode a simulator name — GitHub rotates which devices
+          # ship on the macOS image (this step broke once "iPad (10th
+          # generation)" was dropped). Pick the first available iOS simulator
+          # at runtime instead.
+          DEVICE_ID=$(xcrun simctl list devices available -j \
+            | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; ids=[x['udid'] for k,v in d.items() if 'iOS' in k for x in v]; print(ids[0] if ids else '')")
+          if [ -z "$DEVICE_ID" ]; then
+            echo "No iOS simulator available on the runner" >&2
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $DEVICE_ID"
           xcodebuild \
             -scheme ShutterGlow \
-            -destination 'platform=iOS Simulator,name=iPad (10th generation)' \
+            -destination "id=$DEVICE_ID" \
             test
 
       - name: Build (unsigned)
