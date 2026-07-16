@@ -448,35 +448,43 @@ public actor PTPIPTransport: PTPTransport {
         // instead of the aspirational "outer wrapper" that never existed.
         do {
             return try await withTimeout(seconds: 10) {
-                try await withCheckedThrowingContinuation { continuation in
-                    var resumed = false
-                    connection.stateUpdateHandler = { state in
-                        guard !resumed else { return }
-                        switch state {
-                        case .ready:
-                            resumed = true
-                            continuation.resume(returning: connection)
-                        case .failed(let error):
-                            resumed = true
-                            continuation.resume(throwing: PTPIPError.connectionFailed("\(error)"))
-                        case .cancelled:
-                            resumed = true
-                            continuation.resume(throwing: PTPIPError.connectionFailed("connection cancelled before ready"))
-                        case .waiting(let error):
-                            Task { await self.log("connection waiting: \(error)") }
-                        default:
-                            break
+                // withTaskCancellationHandler is load-bearing, not decorative:
+                // withTimeout cancels this operation when the deadline fires,
+                // but a bare continuation waiting on stateUpdateHandler never
+                // observes cancellation, so the whole timeout would hang
+                // waiting for a task that never finishes. Cancelling the
+                // connection forces stateUpdateHandler to emit `.cancelled`,
+                // which resumes the continuation and lets the timeout return.
+                try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { continuation in
+                        var resumed = false
+                        connection.stateUpdateHandler = { state in
+                            guard !resumed else { return }
+                            switch state {
+                            case .ready:
+                                resumed = true
+                                continuation.resume(returning: connection)
+                            case .failed(let error):
+                                resumed = true
+                                continuation.resume(throwing: PTPIPError.connectionFailed("\(error)"))
+                            case .cancelled:
+                                resumed = true
+                                continuation.resume(throwing: PTPIPError.connectionFailed("connection cancelled before ready"))
+                            case .waiting(let error):
+                                Task { await self.log("connection waiting: \(error)") }
+                            default:
+                                break
+                            }
                         }
+                        connection.start(queue: .global(qos: .userInitiated))
                     }
-                    connection.start(queue: .global(qos: .userInitiated))
+                } onCancel: {
+                    connection.cancel()
                 }
             }
         } catch {
-            // The continuation-based state handler above doesn't observe
-            // Task cancellation on its own — if the outer timeout fired,
-            // the NWConnection is still live and its handler may resolve
-            // (and thus leak) the already-abandoned continuation later.
-            // Cancelling here forces that resolution now instead of never.
+            // Belt-and-suspenders: on any throw (incl. the timeout path above)
+            // make sure the socket is torn down rather than left live.
             connection.cancel()
             throw error
         }
@@ -522,18 +530,28 @@ public actor PTPIPTransport: PTPTransport {
         var collected = Data(capacity: count)
         while collected.count < count {
             let remaining = count - collected.count
-            let chunk: Data = try await withCheckedThrowingContinuation { continuation in
-                connection.receive(minimumIncompleteLength: 1, maximumLength: remaining) { data, _, isComplete, error in
-                    if let error {
-                        continuation.resume(throwing: PTPIPError.connectionFailed("\(error)"))
-                    } else if let data, !data.isEmpty {
-                        continuation.resume(returning: data)
-                    } else if isComplete {
-                        continuation.resume(throwing: PTPIPError.connectionFailed("connection closed mid-read"))
-                    } else {
-                        continuation.resume(returning: Data())
+            // Cancellation-aware: a silently dead Wi-Fi link never fires the
+            // receive callback, so without this a capture that loses signal
+            // mid-read would hang forever and the outer withTimeout could
+            // never fire (it awaits this task). Cancelling the connection
+            // forces the callback to complete with an error, unblocking it —
+            // this is what makes the "Wi-Fi drop mid-capture" recovery real.
+            let chunk: Data = try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    connection.receive(minimumIncompleteLength: 1, maximumLength: remaining) { data, _, isComplete, error in
+                        if let error {
+                            continuation.resume(throwing: PTPIPError.connectionFailed("\(error)"))
+                        } else if let data, !data.isEmpty {
+                            continuation.resume(returning: data)
+                        } else if isComplete {
+                            continuation.resume(throwing: PTPIPError.connectionFailed("connection closed mid-read"))
+                        } else {
+                            continuation.resume(returning: Data())
+                        }
                     }
                 }
+            } onCancel: {
+                connection.cancel()
             }
             collected.append(chunk)
         }

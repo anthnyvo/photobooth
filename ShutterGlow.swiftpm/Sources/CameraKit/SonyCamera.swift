@@ -83,6 +83,11 @@ public actor SonyCamera: TetheredCamera {
     /// different.
     private func startLiveviewReader(url: URL) {
         liveViewTask?.cancel()
+        // Cancel the previous reader before replacing it — otherwise the old
+        // HTTP data task keeps downloading multipart JPEG from the camera
+        // forever (cancelling liveViewTask stops the CONSUMER, not the
+        // underlying URLSession task), leaking bandwidth/battery per restart.
+        chunkedReader?.cancel()
         let reader = ChunkedHTTPStream()
         chunkedReader = reader
         let chunks = reader.start(url: url)
@@ -223,6 +228,11 @@ private final class ChunkedHTTPStream: NSObject, URLSessionDataDelegate, @unchec
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         continuation?.finish()
         continuation = nil
+        // URLSession holds a STRONG reference to its delegate (self) until
+        // invalidated. Without this, every naturally-ended live view leaks a
+        // ChunkedHTTPStream + URLSession pair for the life of the process —
+        // only the explicit cancel() path used to invalidate.
+        session.finishTasksAndInvalidate()
     }
 }
 

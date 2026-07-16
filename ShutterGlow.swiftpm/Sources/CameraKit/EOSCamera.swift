@@ -282,7 +282,14 @@ public actor EOSCamera {
         isCapturePaused = true
         defer {
             isCapturePaused = false
-            startEventLoop()
+            // Only re-arm the GetEvent poll loop if we're still connected.
+            // If disconnect() ran while a capture was in flight (booth
+            // teardown, brand switch, reconnect), the capture's throw would
+            // otherwise resurrect a polling loop against a dead transport,
+            // error-looping every ~1.5s until this instance deallocates.
+            if state == .connected || state == .liveView {
+                startEventLoop()
+            }
         }
         try await triggerShutter()
         return try await transport.nextCapturedFile(timeout: 15)

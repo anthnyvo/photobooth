@@ -458,6 +458,21 @@ struct AdminView: View {
             timelapseEnabled: timelapseEnabled,
             ai: .init(props: aiProps, smileShutter: aiSmileShutter)
         )
+        // The form doesn't carry every field. When EDITING, rebuilding from
+        // scratch would silently reset the ones it omits: isRemote (→ false,
+        // which routes deleteEvent down the local-only path and lets the
+        // dashboard event resurrect on next sync), logoAssetName (→ nil,
+        // detaching the client's logo mid-event), createdAt (→ now, reordering
+        // the picker), and share.sms. Carry those over from the existing
+        // config. Create mode keeps the fresh defaults, which is correct.
+        if mode == .edit {
+            config.isRemote = model.config.isRemote
+            config.createdAt = model.config.createdAt
+            config.share.sms = model.config.share.sms
+            if logoData == nil {
+                config.logoAssetName = model.config.logoAssetName
+            }
+        }
         do {
             try EventStorage.shared.createEvent(config)
             if let logoData {

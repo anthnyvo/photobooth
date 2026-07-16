@@ -63,7 +63,7 @@ struct ShareView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    if model.config.share.qrGallery && !model.cameraIsSelfHostedAP {
+                    if model.config.share.qrGallery && model.qrSharingAvailable {
                         DialButton(label: "QR Code", systemImage: "qrcode") {
                             presentQR()
                         }
@@ -85,7 +85,11 @@ struct ShareView: View {
                     // Print is stills-only — an animated GIF can't print.
                     if model.config.print.enabled && !isGIF {
                         DialButton(label: "Print", systemImage: "printer") {
-                            printsThisSession += 1
+                            // Count on the tap being allowed — but the credit
+                            // is only actually consumed on a confirmed
+                            // "Sent to printer" (see onChange below). A
+                            // cancelled/failed dialog must not burn a guest's
+                            // only print on a limit-1 event.
                             printJob.print(photoURL: photoURL)
                         }
                         .disabled(printLimitReached)
@@ -122,9 +126,29 @@ struct ShareView: View {
         .sheet(isPresented: $showingMail) {
             MailComposeView(photoURL: photoURL)
         }
+        // Pause the idle auto-return while any share surface is open, and
+        // re-arm it once the guest closes it — otherwise the 20s timer fires
+        // mid-share and discards a half-composed email or an open QR sheet.
+        .onChange(of: showingQR) { _, open in
+            if open { model.cancelAutoReturn() } else { model.scheduleAutoReturn() }
+        }
+        .onChange(of: showingMail) { _, open in
+            if open { model.cancelAutoReturn() } else { model.scheduleAutoReturn() }
+        }
         .onChange(of: printJob.statusMessage) { _, message in
-            if message == "Sent to printer" {
+            switch message {
+            case "Sending to printer…":
+                // Print dialog is up — don't let auto-return kill it.
+                model.cancelAutoReturn()
+            case "Sent to printer":
+                // Consume the per-guest credit only on a confirmed send, so
+                // the disable-at-limit gate reflects real prints, not taps.
+                printsThisSession += 1
                 EventStorage.shared.recordPrint(eventId: model.config.eventId)
+                model.scheduleAutoReturn()
+            default:
+                // Terminal (cancelled/failed/cleared) — resume the timer.
+                model.scheduleAutoReturn()
             }
         }
     }

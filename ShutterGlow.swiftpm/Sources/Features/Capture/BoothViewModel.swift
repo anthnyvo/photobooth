@@ -144,17 +144,19 @@ public final class BoothViewModel: ObservableObject {
         }
     }
 
-    /// QR sharing needs this device and the guest's phone on the same
-    /// network, which only happens when the camera is joined to the venue's
-    /// own Wi-Fi (infrastructure mode) — not when it's creating its own
-    /// private access point. There's no direct API for "is this an AP I
-    /// joined vs. a router-issued network," so this leans on the one signal
-    /// available: the camera's private-AP default is always 192.168.1.x
-    /// (also this app's placeholder default), so an IP in that subnet reads
-    /// as "camera's own AP" and QR gets hidden rather than offering a share
-    /// option that can't actually reach the guest's phone.
-    public var cameraIsSelfHostedAP: Bool {
-        cameraIPText.hasPrefix("192.168.1.")
+    /// Whether QR sharing can plausibly work: the QR encodes a URL to THIS
+    /// iPad's LocalPhotoServer (built from its own Wi-Fi IP), so what matters
+    /// is that the iPad has a real Wi-Fi LAN address — not the camera's IP.
+    ///
+    /// The previous check keyed off the CAMERA's IP being 192.168.1.x, on the
+    /// theory that that's the camera's private-AP default. But 192.168.1.x is
+    /// also the single most common consumer/venue router subnet, so it hid QR
+    /// at the majority of real venues where sharing would have worked fine —
+    /// checking the wrong device entirely. If the iPad has no en0 IPv4 (no
+    /// Wi-Fi, or joined the camera's bare AP with no reachable clients), the
+    /// server URL is useless and QR is correctly hidden.
+    public var qrSharingAvailable: Bool {
+        NetworkInfo.wifiIPv4Address() != nil
     }
 
     // MARK: - Home / event picker
@@ -761,5 +763,14 @@ public final class BoothViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             if !Task.isCancelled { returnToAttract() }
         }
+    }
+
+    /// Pauses the idle auto-return — called while a guest is actively
+    /// mid-share (QR sheet open, composing an email, print dialog up) so the
+    /// 20s timer can't tear the screen down and discard their in-progress
+    /// action. The caller re-arms it with scheduleAutoReturn() on dismiss.
+    public func cancelAutoReturn() {
+        returnToAttractTask?.cancel()
+        returnToAttractTask = nil
     }
 }

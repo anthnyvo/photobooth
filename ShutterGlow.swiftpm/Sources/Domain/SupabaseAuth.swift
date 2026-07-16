@@ -28,7 +28,7 @@ public enum SupabaseAuthError: Error, LocalizedError {
     }
 }
 
-public final class SupabaseAuth {
+public final class SupabaseAuth: @unchecked Sendable {
     public static let shared = SupabaseAuth()
 
     // Anon key is meant to be embedded client-side — same key the web
@@ -38,10 +38,25 @@ public final class SupabaseAuth {
     static let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmdGJ3cmdpdWRrbmVhc3R0cXNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1Njg1MDQsImV4cCI6MjA5OTE0NDUwNH0.-n3T9IBymBBgNeg2NoTNWCUVbBXZKVXmgZL5eKpomT8"
 
     private static let sessionKey = "session"
-    private var cachedSession: AuthSession?
+    // Guarded by `lock`: read from sync callers (currentSession) and written
+    // from concurrent refresh tasks, so a bare var here is a data race (UB).
+    // The lock is only ever held for the assignment/read, never across an
+    // await, so it can't deadlock the async paths below.
+    private let lock = NSLock()
+    private var _cachedSession: AuthSession?
+    // Coalesces concurrent refreshes: without this, two guest taps hitting an
+    // expired token both POST the same refresh_token, and Supabase's
+    // refresh-token reuse detection revokes the whole token family — silently
+    // signing the booth out mid-event.
+    private var refreshTask: Task<AuthSession, Error>?
+
+    private var cachedSession: AuthSession? {
+        get { lock.lock(); defer { lock.unlock() }; return _cachedSession }
+        set { lock.lock(); _cachedSession = newValue; lock.unlock() }
+    }
 
     private init() {
-        cachedSession = Self.loadFromKeychain()
+        _cachedSession = Self.loadFromKeychain()
     }
 
     public func currentSession() -> AuthSession? {
@@ -86,10 +101,41 @@ public final class SupabaseAuth {
         if session.expiresAt > Date().addingTimeInterval(60) {
             return session
         }
-        return try? await refresh(session)
+        return try? await coalescedRefresh()
     }
 
-    private func refresh(_ session: AuthSession) async throws -> AuthSession {
+    /// Refreshes at most once even under concurrent callers: the first to
+    /// arrive creates the refresh task, the rest await the same one. Re-checks
+    /// the cached session under the lock first, so a caller that raced in just
+    /// after a completed refresh reuses the fresh token instead of POSTing the
+    /// now-rotated refresh_token (which would trip reuse detection).
+    private func coalescedRefresh() async throws -> AuthSession {
+        lock.lock()
+        if let existing = refreshTask {
+            lock.unlock()
+            return try await existing.value
+        }
+        if let current = _cachedSession, current.expiresAt > Date().addingTimeInterval(60) {
+            lock.unlock()
+            return current
+        }
+        guard let stale = _cachedSession else {
+            lock.unlock()
+            throw SupabaseAuthError.network
+        }
+        let task = Task { try await self.performRefresh(stale) }
+        refreshTask = task
+        lock.unlock()
+
+        defer {
+            lock.lock()
+            refreshTask = nil
+            lock.unlock()
+        }
+        return try await task.value
+    }
+
+    private func performRefresh(_ session: AuthSession) async throws -> AuthSession {
         let url = URL(string: "auth/v1/token?grant_type=refresh_token", relativeTo: Self.projectURL)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

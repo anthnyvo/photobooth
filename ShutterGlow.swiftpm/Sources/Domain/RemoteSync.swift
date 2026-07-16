@@ -76,7 +76,10 @@ public enum RemoteSync {
         }
 
         let events = try await fetch([RemoteEvent].self, path: "rest/v1/events?select=id,client_name", session: session)
-        let configs = try await fetch([RemoteBoothConfig].self, path: "rest/v1/booth_configs?select=*", session: session)
+        // Lenient per-row: a single malformed config must not abort sync for
+        // the whole org — that event just falls back to its local/default
+        // config while every other event still syncs.
+        let configs = try await fetchLenientArray(RemoteBoothConfig.self, path: "rest/v1/booth_configs?select=*", session: session)
         let configsByEvent = Dictionary(configs.map { ($0.eventId, $0) }, uniquingKeysWith: { first, _ in first })
 
         for event in events {
@@ -98,10 +101,19 @@ public enum RemoteSync {
     /// unprunable forever. Supabase event ids are always UUIDs and an
     /// attendant-typed local slug essentially never parses as one, so this
     /// fallback catches those pre-existing caches too.
+    ///
+    /// NEVER prunes an event that still has captured photos on disk. This
+    /// app is local-first: photos live only on the iPad until explicitly
+    /// exported. Auto-deleting them because the dashboard row disappeared —
+    /// or, worse, because a DIFFERENT operator signed into the same iPad and
+    /// their event list doesn't include this one — would be silent,
+    /// unrecoverable data loss. A photo-bearing event lingers locally until
+    /// an attendant deletes it deliberately (which does warn).
     private static func prune(keeping remoteIds: Set<String>) {
         for eventId in EventStorage.shared.listEventIds() where !remoteIds.contains(eventId) {
             guard let local = try? EventStorage.shared.load(eventId),
                   local.isRemote || UUID(uuidString: eventId) != nil else { continue }
+            guard EventStorage.shared.listPhotos(eventId: eventId).isEmpty else { continue }
             try? EventStorage.shared.deleteEvent(eventId)
         }
     }
@@ -126,7 +138,7 @@ public enum RemoteSync {
         _ = try? await URLSession.shared.data(for: request)
     }
 
-    private static func fetch<T: Decodable>(_ type: T.Type, path: String, session: AuthSession) async throws -> T {
+    private static func fetchData(path: String, session: AuthSession) async throws -> Data {
         var request = URLRequest(url: URL(string: path, relativeTo: projectURL)!)
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
@@ -141,7 +153,26 @@ public enum RemoteSync {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw SyncError.network
         }
+        return data
+    }
+
+    private static func fetch<T: Decodable>(_ type: T.Type, path: String, session: AuthSession) async throws -> T {
+        let data = try await fetchData(path: path, session: session)
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    /// Decodes a JSON array element-by-element, dropping any row that fails to
+    /// decode instead of aborting the whole batch. One booth_configs row with
+    /// malformed/missing jsonb (hand-edited, or written by a mismatched
+    /// dashboard build) must not brick sync for every OTHER event in the org.
+    private static func fetchLenientArray<T: Decodable>(_ type: T.Type, path: String, session: AuthSession) async throws -> [T] {
+        let data = try await fetchData(path: path, session: session)
+        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [Any] else { return [] }
+        let decoder = JSONDecoder()
+        return rows.compactMap { row in
+            guard let rowData = try? JSONSerialization.data(withJSONObject: row) else { return nil }
+            return try? decoder.decode(T.self, from: rowData)
+        }
     }
 
     private static func merge(_ event: RemoteEvent, config: RemoteBoothConfig?) async {
