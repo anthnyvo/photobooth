@@ -39,21 +39,36 @@ let package = Package(
         )
     ],
     targets: [
+        // Camera protocol/tethering layer, split out from AppModule solely
+        // so it's a plain library target — `@testable import AppModule`
+        // fails ("no such module") because AppModule is wrapped in
+        // AppleProductTypes' .iOSApplication product, which doesn't produce
+        // an importable module the normal way. A library target has no such
+        // restriction, so the tests below `@testable import CameraKit`
+        // instead. Every symbol the app or tests cross this boundary with
+        // was already `public` before this split (verified by grep across
+        // Sources/App, Sources/Domain, Sources/Features) except
+        // SonyLiveviewParser, fixed alongside this change.
+        .target(
+            name: "CameraKit",
+            path: "Sources/CameraKit"
+        ),
         .executableTarget(
             name: "AppModule",
+            dependencies: ["CameraKit"],
             path: "Sources",
+            exclude: ["CameraKit"],
             resources: [
                 .process("Assets.xcassets")
             ]
+        ),
+        // Pure parsing tests — no hardware, no simulator I/O, just the
+        // byte-level PTP/PTP-IP/Sony-liveview framing logic. See
+        // Tests/AppModuleTests for the actual cases.
+        .testTarget(
+            name: "AppModuleTests",
+            dependencies: ["CameraKit"],
+            path: "Tests/AppModuleTests"
         )
-        // A testTarget depending on AppModule was tried here and reverted:
-        // `@testable import AppModule` fails with "no such module" when
-        // AppModule is wrapped in AppleProductTypes' .iOSApplication product
-        // (this Swift Playgrounds packaging), unlike a plain SPM executable
-        // — confirmed on CI, not a local guess. Real fix needs CameraKit
-        // extracted into its own library target first (dependencies: []
-        // list would gain "CameraKit", tests would `@testable import
-        // CameraKit` instead) — see Tests/AppModuleTests for the actual
-        // test cases, written and ready, just not wired to a target yet.
     ]
 )

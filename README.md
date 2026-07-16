@@ -10,9 +10,9 @@ before anything else gets built).
 ShutterGlow.swiftpm/   Swift Playgrounds app project — builds and runs ON THE iPAD, no Mac.
   Package.swift        App manifest (camera purpose string declared here)
   Sources/App/         Spike UI: connect → live view → capture, fps counter, log export
-  Sources/CameraKit/   PTP codec, Canon EOS protocol actor, ImageCaptureCore transport
-  MacOnlyTests/        Parsing unit tests — parked outside Sources/, not built by
-                       Playgrounds; runnable later on Mac/CI
+  Sources/CameraKit/   PTP codec, Canon EOS protocol actor, ImageCaptureCore transport —
+                       its own library target so tests can @testable import it
+  Tests/AppModuleTests/ Parsing unit tests against CameraKit, run in CI via xcodebuild
 docs/PHASE0.md         Test protocol T1–T7, exit criteria, fallback ladder, findings log
 ```
 

@@ -1,5 +1,5 @@
 import XCTest
-@testable import AppModule
+@testable import CameraKit
 
 /// Pure parsing tests — run without hardware, on CI's macOS runner via
 /// `swift test`. Hardware truth still comes from real devices; these lock

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CameraKit
 
 /// Drives the Phase 0 spike screen. One state machine, heavy logging —
 /// the whole point is to learn what the EOS R actually does over whichever

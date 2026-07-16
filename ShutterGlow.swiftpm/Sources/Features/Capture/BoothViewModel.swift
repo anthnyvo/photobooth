@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import CameraKit
 
 /// Guest-facing flow state. Distinct from ShutterGlow's diagnostic
 /// SpikeViewModel — this one drives the actual booth experience, reusing the

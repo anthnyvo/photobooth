@@ -1,4 +1,5 @@
 import SwiftUI
+import CameraKit
 
 /// Root router for the guest-facing booth. ShutterGlow's diagnostic screen
 /// (SpikeView) stays reachable via a long-press in the corner for ongoing

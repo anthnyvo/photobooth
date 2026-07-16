@@ -1,5 +1,5 @@
 import XCTest
-@testable import AppModule
+@testable import CameraKit
 
 final class SonyLiveviewParserTests: XCTestCase {
 

@@ -227,12 +227,12 @@ private final class ChunkedHTTPStream: NSObject, URLSessionDataDelegate, @unchec
 }
 
 /// Frame extractor for Sony's liveview stream format.
-enum SonyLiveviewParser {
+public enum SonyLiveviewParser {
     /// Attempts to parse one complete payload off the front of `buffer`.
     /// Returns (jpeg-or-nil, bytesConsumed) when a full payload is present
     /// — jpeg is nil for non-image payload types, which are skipped — or
     /// nil when more bytes are needed.
-    static func nextFrame(in buffer: Data) -> (Data?, Int)? {
+    public static func nextFrame(in buffer: Data) -> (Data?, Int)? {
         // Resync: find the 0xFF start byte of a common header.
         guard let start = buffer.firstIndex(of: 0xFF) else {
             return buffer.isEmpty ? nil : (nil, buffer.count)
