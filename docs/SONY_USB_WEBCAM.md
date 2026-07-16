@@ -100,13 +100,11 @@ Lightning port is a dead end regardless of adapter.
 - [x] App: USB Webcam (tested) → Connect
 - [x] Grant camera permission when prompted
 - [x] Confirm live view renders on the attract/capture screen — confirmed working 2026-07-15
-- [ ] Confirm capture works and the image lands correctly
-- [ ] Check resulting photo resolution/quality is print-usable
-- [ ] Confirm no hot-shoe flash fires on capture (expected — flag if this
-      matters for a real event)
-- [ ] Confirm GIF/Boomerang + timelapse still work (they sample the live
-      feed, should work unchanged, worth confirming)
-- [ ] If all pass: merge `feature/multi-camera` → `main`, redeploy
+- [x] Confirm capture works and the image lands correctly — confirmed working 2026-07-16
+- [x] Check resulting photo resolution/quality is print-usable — confirmed working 2026-07-16
+- [x] Confirm no hot-shoe flash fires on capture (expected) — confirmed 2026-07-16
+- [x] Confirm GIF/Boomerang + timelapse still work — confirmed working 2026-07-16
+- [x] If all pass: merge `feature/multi-camera` → `main`, redeploy — merged 2026-07-16
 
 Note: the "Other PTP (beta)" fallback brand mentioned in earlier drafts of
 this doc has since been removed from the app (camera picker trimmed to
