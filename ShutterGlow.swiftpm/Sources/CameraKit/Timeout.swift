@@ -1,6 +1,6 @@
 import Foundation
 
-enum TimeoutError: Error {
+public enum TimeoutError: Error {
     case timedOut
 }
 
@@ -9,7 +9,7 @@ enum TimeoutError: Error {
 /// (Wi-Fi drops out of range, no clean FIN/RST) leaves a pending `receive`
 /// callback waiting forever. Without an outer race like this, that hang
 /// propagates straight into the UI with no way out.
-func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+public func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await operation() }
         group.addTask {
