@@ -491,8 +491,12 @@ struct AdminView: View {
     /// sheet so the attendant can email/AirDrop the list off the device.
     private func exportLeads() {
         let csv = EventStorage.shared.leadsCSV(eventId: model.config.eventId)
+        // Same sanitizer the storage layer uses — the raw eventId is
+        // attendant-typed free text, and a path separator in it would make
+        // this temp write fail (silently, per the guard below).
+        let safeId = EventStorage.sanitizeEventId(model.config.eventId)
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("leads-\(model.config.eventId).csv")
+            .appendingPathComponent("leads-\(safeId).csv")
         guard (try? csv.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
         leadExportURL = url
         showingLeadExport = true

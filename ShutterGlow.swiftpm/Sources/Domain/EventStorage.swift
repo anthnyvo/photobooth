@@ -235,7 +235,15 @@ public final class EventStorage {
     /// Spreadsheet-ready export of the collected leads for this event.
     public func leadsCSV(eventId: String) -> String {
         func esc(_ s: String) -> String {
-            "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+            // Guest-typed text lands in the operator's spreadsheet app —
+            // a value starting with = + - @ (or a stray tab/CR) is treated
+            // as a live formula by Excel/Sheets (CSV injection). Prefix a
+            // single quote so it renders as text instead of executing.
+            var v = s
+            if let first = v.first, "=+-@\t\r".contains(first) {
+                v = "'" + v
+            }
+            return "\"" + v.replacingOccurrences(of: "\"", with: "\"\"") + "\""
         }
         let iso = ISO8601DateFormatter()
         var rows = ["Name,Email,Phone,Consented,CapturedAt"]

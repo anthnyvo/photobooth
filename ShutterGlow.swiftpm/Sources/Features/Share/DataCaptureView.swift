@@ -91,8 +91,12 @@ struct DataCaptureView: View {
     }
 
     /// Require at least one contact method the event asked for, so a submitted
-    /// lead is actually reachable — otherwise the guest should Skip.
+    /// lead is actually reachable — otherwise the guest should Skip. When a
+    /// consent line is configured, the box must be ticked too: storing a
+    /// marketing contact whose recorded answer is "did not consent" is worse
+    /// than storing nothing — a guest who won't tick it should Skip instead.
     private var canContinue: Bool {
+        if !options.consentText.isEmpty && !consented { return false }
         var ok = false
         if options.collectEmail, !email.trimmingCharacters(in: .whitespaces).isEmpty { ok = true }
         if options.collectPhone, !phone.trimmingCharacters(in: .whitespaces).isEmpty { ok = true }
