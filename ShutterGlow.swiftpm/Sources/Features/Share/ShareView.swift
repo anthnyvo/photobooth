@@ -57,11 +57,13 @@ struct ShareView: View {
                                 dialFace(label: "AirDrop", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.plain)
+                            .simultaneousGesture(shareSheetGraceGesture)
                         } else if let uiImage {
                             ShareLink(item: Image(uiImage: uiImage), preview: SharePreview("Photo", image: Image(uiImage: uiImage))) {
                                 dialFace(label: "AirDrop", systemImage: "square.and.arrow.up")
                             }
                             .buttonStyle(.plain)
+                            .simultaneousGesture(shareSheetGraceGesture)
                         }
                     }
                     if model.config.share.qrGallery && model.qrSharingAvailable {
@@ -82,6 +84,7 @@ struct ShareView: View {
                             dialFace(label: "Timelapse", systemImage: "timelapse")
                         }
                         .buttonStyle(PressableStyle())
+                        .simultaneousGesture(shareSheetGraceGesture)
                     }
                     // Print is stills-only — an animated GIF can't print.
                     if model.config.print.enabled && !isGIF {
@@ -170,6 +173,19 @@ struct ShareView: View {
                 // Terminal (cancelled/failed/cleared) — resume the timer.
                 model.scheduleAutoReturn()
             }
+        }
+    }
+
+    /// ShareLink presents the system share sheet with no dismissal callback,
+    /// so unlike the QR/mail/print sheets it can't pause-and-resume the idle
+    /// timer around its exact lifetime. Every other share surface pauses the
+    /// 20s auto-return; without this, it fired mid-AirDrop and tore the
+    /// screen (and the share sheet) down. A tap instead re-arms with a long
+    /// grace window — plenty for an AirDrop, but the booth still recovers if
+    /// the guest walks off with the sheet open.
+    private var shareSheetGraceGesture: some Gesture {
+        TapGesture().onEnded {
+            model.scheduleAutoReturn(after: 120)
         }
     }
 

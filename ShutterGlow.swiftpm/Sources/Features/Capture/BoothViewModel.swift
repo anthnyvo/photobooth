@@ -619,6 +619,15 @@ public final class BoothViewModel: ObservableObject {
                         processed = FacePropRenderer.apply(currentProp, to: processed)
                     }
                     processed = currentFilter.apply(to: processed)
+                    // Square crop is per SHOT, before compositing. Cropping
+                    // the composited strip instead (the old order) squared
+                    // off the whole strip: a 4-shot vertical strip is ~3x
+                    // taller than wide, so the centered square kept only the
+                    // middle ~2 frames — the guest shot 4 photos and got a
+                    // print showing 2.
+                    if currentConfig.squareCrop {
+                        processed = PhotoCompositor.applySquareCrop(to: processed)
+                    }
                     return processed
                 }
                 let firstProcessed = processedShots.first ?? firstShot
@@ -628,9 +637,6 @@ public final class BoothViewModel: ObservableObject {
                     composited = PhotoCompositor.compositeStrip(processedShots, layout: currentLayout) ?? firstProcessed
                 } else {
                     composited = firstProcessed
-                }
-                if currentConfig.squareCrop {
-                    composited = PhotoCompositor.applySquareCrop(to: composited)
                 }
                 // Event overlay, then the guest's chosen sticker, then the
                 // Polaroid frame last so the border wraps everything.
