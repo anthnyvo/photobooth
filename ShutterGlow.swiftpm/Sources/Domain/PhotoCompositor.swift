@@ -215,8 +215,10 @@ enum PhotoCompositor {
         return composited.jpegData(compressionQuality: 0.9)
     }
 
-    /// Crops the final photo to a centered square — independent of strip
-    /// layout, applies to a single shot or an already-composited strip.
+    /// Crops one photo to a centered square. Callers apply this per SHOT,
+    /// before strip compositing — cropping an already-composited strip
+    /// would throw away every frame outside the centered square (a 4-shot
+    /// vertical strip squared down to its middle ~2 frames).
     static func applySquareCrop(to photoData: Data) -> Data {
         guard let image = UIImage(data: photoData) else { return photoData }
         let side = min(image.size.width, image.size.height)
