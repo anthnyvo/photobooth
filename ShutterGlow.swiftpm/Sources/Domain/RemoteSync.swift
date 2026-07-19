@@ -258,6 +258,19 @@ public enum RemoteSync {
                    (try? EventStorage.shared.importLogoData(imageData, eventId: event.id, filename: "overlay.png")) != nil {
                     local.overlay = EventConfig.OverlayOptions(enabled: true, assetName: "overlay.png")
                 }
+                // If the download failed (network blip, dead URL), fall through
+                // and keep whatever overlay state already exists locally rather
+                // than disabling a working overlay over a transient error.
+            } else {
+                // Dashboard's overlay_template_url is empty/cleared — the
+                // owner removed it, so a synced event should stop showing the
+                // overlay. Previously this branch didn't exist at all: the
+                // whole block only ever ran when a URL was present, so
+                // clearing the field on the dashboard and saving had zero
+                // effect on any device that already had the overlay enabled
+                // from an earlier sync — the one config field the dashboard
+                // could set but never unset.
+                local.overlay = EventConfig.OverlayOptions(enabled: false, assetName: nil)
             }
         }
 
