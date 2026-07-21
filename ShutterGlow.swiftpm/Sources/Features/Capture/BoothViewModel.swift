@@ -142,10 +142,19 @@ public final class BoothViewModel: ObservableObject {
         syncError = nil
         defer { isSyncing = false }
         do {
-            try await RemoteSync.syncEvents()
+            let count = try await RemoteSync.syncEvents()
+            DiagnosticLog.shared.log(.sync, "sync ok, \(count) events")
             return true
+        } catch let error as RemoteSync.SyncError {
+            // Say which failure it was. An expired session and a dead venue
+            // Wi-Fi need completely different responses from the attendant,
+            // and the old single string made them indistinguishable.
+            syncError = error.attendantMessage
+            DiagnosticLog.shared.log(.sync, "sync failed: \(error)")
+            return false
         } catch {
-            syncError = "Couldn't sync — showing what's cached"
+            syncError = "Couldn't sync. Showing cached events."
+            DiagnosticLog.shared.log(.sync, "sync failed (unexpected): \(error)")
             return false
         }
     }
@@ -229,6 +238,7 @@ public final class BoothViewModel: ObservableObject {
             transport = nil
             guard let cam = SonyCamera(host: cameraIPText) else {
                 lastError = "Couldn't connect — check the camera's IP address"
+                DiagnosticLog.shared.log(.camera, "connect failed: bad/unreachable IP")
                 connectionMessage = "Enter the camera's IP and connect"
                 return
             }
@@ -272,6 +282,7 @@ public final class BoothViewModel: ObservableObject {
                 try await wifiTransport.connect()
             } catch {
                 self.lastError = "Connect failed: \(error)"
+                DiagnosticLog.shared.log(.camera, "connect failed: \(error)")
                 self.connectionMessage = "Connect failed — check the camera is in Remote control (EOS Utility) mode and the IP is correct"
             }
         }
@@ -286,6 +297,7 @@ public final class BoothViewModel: ObservableObject {
             await startRemoteModeAndLiveView()
         case .deviceRemoved:
             lastError = "Camera disconnected"
+            DiagnosticLog.shared.log(.camera, "camera disconnected mid-session")
             step = .connecting
             connectionMessage = "Camera disconnected — reconnect to continue"
             liveViewImage = nil
@@ -330,6 +342,7 @@ public final class BoothViewModel: ObservableObject {
             step = .attract
         } catch {
             lastError = "Remote mode / live view failed: \(error)"
+            DiagnosticLog.shared.log(.camera, "live view failed: \(error)")
         }
     }
 
@@ -506,6 +519,7 @@ public final class BoothViewModel: ObservableObject {
             // Live view stalled the whole window (dead connection most
             // likely) — same guest-facing outcome as a failed capture.
             lastError = "Couldn't record — try again"
+            DiagnosticLog.shared.log(.capture, "record failed")
             step = .attract
             return
         }
@@ -526,6 +540,7 @@ public final class BoothViewModel: ObservableObject {
             step = .review(url)
         } catch {
             lastError = "Save failed: \(error)"
+            DiagnosticLog.shared.log(.capture, "save failed: \(error)")
             step = .attract
         }
     }
@@ -570,6 +585,7 @@ public final class BoothViewModel: ObservableObject {
             // IP, rather than leaving the booth silently wedged until an
             // attendant notices and manually hits Connect again.
             lastError = "Capture failed: connection timed out"
+            DiagnosticLog.shared.log(.capture, "capture timed out")
             step = .attract
             await transport?.disconnect()
             step = .connecting

@@ -7,6 +7,7 @@ import CameraKit
 struct BoothRootView: View {
     @StateObject private var model = BoothViewModel()
     @State private var showDiagnostics = false
+    @State private var showExitPIN = false
 
     var body: some View {
         ZStack {
@@ -40,6 +41,29 @@ struct BoothRootView: View {
             .transition(.opacity.combined(with: .scale(scale: 0.985)))
             .animation(.snappy(duration: 0.3), value: model.step)
 
+            // Attendant exit from the guest flow, PIN-gated. Shown only on
+            // the attract screen: that's where the booth idles between
+            // guests, so the attendant can always get out, while a guest
+            // mid-countdown or mid-capture can't derail their own session
+            // by hitting it. .readyToShoot deliberately keeps its own
+            // unGated back button, which just cancels that guest's session
+            // rather than leaving the booth.
+            //
+            // The PIN is what makes this safe to show openly. Without it,
+            // a visible exit on a kiosk screen is an invitation for a guest
+            // to wander into the event picker mid-event.
+            if model.step == .attract {
+                VStack {
+                    HStack {
+                        BackButton { showExitPIN = true }
+                            .padding(.leading, 20)
+                            .padding(.top, 20)
+                        Spacer()
+                    }
+                    Spacer()
+                }
+            }
+
             // Hidden attendant escape hatch — bottom-right corner, long
             // press. Was top-left, same corner every screen's back button
             // now lives in — an invisible hit-testable view still consumes
@@ -57,6 +81,12 @@ struct BoothRootView: View {
             }
         }
         .statusBarHidden()
+        .sheet(isPresented: $showExitPIN) {
+            PINPromptSheet(prompt: "Attendant PIN to exit") {
+                DiagnosticLog.shared.log(.app, "attendant exited booth to event picker")
+                model.backToEventPicker()
+            }
+        }
         .fullScreenCover(isPresented: $showDiagnostics) {
             // Was reachable by any guest with a 2-second long-press and no
             // PIN — SpikeView's independent camera controls could collide

@@ -71,6 +71,8 @@ struct AdminView: View {
     @State private var showingExport = false
     @State private var showingLeadExport = false
     @State private var leadExportURL: URL?
+    @State private var showingDiagExport = false
+    @State private var diagExportURL: URL?
     @State private var currentPINEntry = ""
     @State private var newPINEntry = ""
     @State private var pinMessage: String?
@@ -401,6 +403,11 @@ struct AdminView: View {
         .sheet(isPresented: $showingExport) {
             PhotoExportSheet(photoURLs: EventStorage.shared.listPhotos(eventId: model.config.eventId))
         }
+        .sheet(isPresented: $showingDiagExport) {
+            if let diagExportURL {
+                PhotoExportSheet(photoURLs: [diagExportURL])
+            }
+        }
         .sheet(isPresented: $showingLeadExport) {
             if let leadExportURL {
                 PhotoExportSheet(photoURLs: [leadExportURL])
@@ -484,7 +491,27 @@ struct AdminView: View {
             .buttonStyle(.plain)
             .disabled(leads == 0)
             .opacity(leads == 0 ? 0.4 : 1)
+
+            // Diagnostics are per-install, not per-event, so this one isn't
+            // gated on the current event having data the way the two above
+            // are. After something goes wrong at a real event this is the
+            // only record of what actually happened.
+            Button {
+                exportDiagnostics()
+            } label: {
+                GlassActionLabel(icon: "doc.text.magnifyingglass", title: "Export Diagnostics Log")
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    /// Writes the diagnostic log to a temp file and opens the share sheet.
+    /// Silently no-ops when nothing has been logged, rather than sharing an
+    /// empty file that looks like a broken export.
+    private func exportDiagnostics() {
+        guard let url = DiagnosticLog.shared.exportFile() else { return }
+        diagExportURL = url
+        showingDiagExport = true
     }
 
     /// Writes the event's collected leads to a temp CSV and opens the share

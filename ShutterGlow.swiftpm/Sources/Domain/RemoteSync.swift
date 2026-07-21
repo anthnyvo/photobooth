@@ -17,9 +17,29 @@ public enum RemoteSync {
     private static let projectURL = SupabaseAuth.projectURL
     private static let anonKey = SupabaseAuth.anonKey
 
+    /// Distinguishes *why* a sync failed. Previously every failure collapsed
+    /// into a single "couldn't sync" string, which meant an expired session
+    /// (fixed by signing out and back in, the common case after a sideload
+    /// re-sign) looked identical to a venue with no Wi-Fi. The attendant
+    /// standing at the booth is the one who has to act on this, so it needs
+    /// to say which.
     public enum SyncError: Error {
         case notSignedIn
         case network
+        case server(status: Int)
+
+        /// Attendant-facing text. Written as an instruction where there is
+        /// one, not a description of the internals.
+        public var attendantMessage: String {
+            switch self {
+            case .notSignedIn:
+                "Sign-in expired. Sign out and back in. Showing cached events."
+            case .network:
+                "No connection to the server. Showing cached events."
+            case .server(let status):
+                "Server refused the sync (\(status)). Showing cached events."
+            }
+        }
     }
 
     /// Deletes an event on the backend, for a remote (dashboard-synced)
@@ -147,10 +167,18 @@ public enum RemoteSync {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
+            DiagnosticLog.shared.log(.sync, "fetch failed (transport): \(path)")
             throw SyncError.network
         }
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse else {
             throw SyncError.network
+        }
+        guard http.statusCode == 200 else {
+            // A 401 here is the expired-session case; surfacing the status
+            // rather than folding it into "network" is what lets the booth
+            // tell the attendant to sign in again instead of blaming Wi-Fi.
+            DiagnosticLog.shared.log(.sync, "fetch failed (HTTP \(http.statusCode)): \(path)")
+            throw SyncError.server(status: http.statusCode)
         }
         return data
     }
