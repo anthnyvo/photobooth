@@ -44,9 +44,9 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
         case .canonEOS:
             "Camera in Remote control (EOS Utility) Wi-Fi mode."
         case .sony:
-            "Camera in Control with Smartphone / Smart Remote mode, iPad joined to the camera's Wi-Fi. Uses Sony's Camera Remote API (older α and RX bodies only — newer bodies dropped this in favor of Creators' App). Untested on hardware."
+            "Camera in Control with Smartphone / Smart Remote mode, iPad joined to the camera's Wi-Fi. Uses Sony's legacy Camera Remote API, which only older α and RX bodies support. Not yet verified on hardware. If you have a recent Sony such as the a7 IV, use USB Webcam instead: that path is tested and runs over a single cable."
         case .usbWebcam:
-            "Camera in USB Streaming/UVC webcam mode, wired to the iPad over USB-C. Verified working on a Sony a7 IV. Not Sony-specific — works with any camera body whose firmware supports native UVC, e.g. recent Canon EOS (R1, R5 II, R6 II/III/V, R8, R50), Nikon (Z5 II, Z50 II, ZR, Z6 III), Fujifilm (X100VI, X-E5, X-H2/H2S, X-M5, X-S20, X-T30 III, X-T5, X-T50), Panasonic Lumix (S1 II, S1 IIE, L10) — not GoPro, which uses a proprietary protocol instead of standard UVC. No IP needed, just plug in and tap Connect. Live view AND capture both come from the video feed, not the shutter — no hot-shoe flash sync, and photo resolution is capped at the stream's resolution, not the sensor's full still resolution."
+            "Camera in USB Streaming/UVC webcam mode, wired to the iPad over USB-C. Verified working on a Sony a7 IV. Not Sony-specific: works with any camera whose firmware supports native UVC, including recent Canon EOS (R1, R5 II, R6 II/III/V, R8, R50), Nikon (Z5 II, Z50 II, ZR, Z6 III), Fujifilm (X100VI, X-E5, X-H2/H2S, X-M5, X-S20, X-T30 III, X-T5, X-T50) and Panasonic Lumix (S1 II, S1 IIE, L10). Not GoPro, which uses a proprietary protocol instead of standard UVC. No IP needed, just plug in and tap Connect. Live view and capture both come from the video feed rather than the shutter, so there is no hot-shoe flash sync and photo resolution is capped at the stream resolution, not the sensor's full still resolution."
         }
     }
 
