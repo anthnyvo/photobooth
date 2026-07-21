@@ -8,12 +8,11 @@ import Foundation
 ///
 /// Deliberately maps only the fields the web dashboard's booth_configs
 /// schema actually has (print layout/limits, countdown, filters/
-/// animations, square crop, overlay image, AirDrop/QR/email share
-/// channels). Branding colors and logo aren't in that schema yet (no
-/// asset-upload path wired on the dashboard side), so a synced event
-/// keeps whatever it already had locally for those — the on-device Admin
-/// screen remains the way to set them until the dashboard grows a
-/// matching image upload.
+/// animations, square crop, overlay/logo/backdrop/sticker images, brand
+/// colors, AirDrop/QR/email share channels). Logo/backdrop/stickers use
+/// the same "dashboard stores a hosted URL, iPad downloads it on sync"
+/// mechanism as overlay — there's no Supabase Storage upload widget, so
+/// the dashboard operator hosts the image elsewhere and pastes the URL.
 public enum RemoteSync {
     private static let projectURL = SupabaseAuth.projectURL
     private static let anonKey = SupabaseAuth.anonKey
@@ -195,8 +194,7 @@ public enum RemoteSync {
             local.timelapseEnabled = config.liveViewSettings.timelapseEnabled ?? false
             // Glam + data-capture: pure settings, safe to sync. Preserve the
             // existing local value when the key is absent (older dashboard
-            // rows) rather than resetting. Background-replace/stickers are
-            // intentionally NOT synced — they depend on on-device assets.
+            // rows) rather than resetting.
             local.glam = EventConfig.GlamOptions(
                 enabled: config.liveViewSettings.glamEnabled ?? local.glam.enabled
             )
@@ -272,6 +270,59 @@ public enum RemoteSync {
                 // could set but never unset.
                 local.overlay = EventConfig.OverlayOptions(enabled: false, assetName: nil)
             }
+
+            // Colors are plain strings, no download needed. Preserve local
+            // when a key is absent (older dashboard rows) same as glam/data
+            // capture above.
+            local.colors = EventConfig.Colors(
+                primaryHex: config.liveViewSettings.colorPrimaryHex ?? local.colors.primaryHex,
+                backgroundHex: config.liveViewSettings.colorBackgroundHex ?? local.colors.backgroundHex
+            )
+
+            if let logoURLString = config.liveViewSettings.logoURL,
+               let logoURL = URL(string: logoURLString) {
+                let downloaded = try? await URLSession.shared.data(from: logoURL)
+                if let imageData = downloaded?.0,
+                   (try? EventStorage.shared.importLogoData(imageData, eventId: event.id, filename: "logo.png")) != nil {
+                    local.logoAssetName = "logo.png"
+                }
+                // Download failure: keep whatever local already has, same
+                // reasoning as the overlay block above.
+            } else {
+                local.logoAssetName = nil
+            }
+
+            if let backdropURLString = config.liveViewSettings.backdropURL,
+               let backdropURL = URL(string: backdropURLString) {
+                let downloaded = try? await URLSession.shared.data(from: backdropURL)
+                if let imageData = downloaded?.0,
+                   (try? EventStorage.shared.importLogoData(imageData, eventId: event.id, filename: "backdrop.png")) != nil {
+                    local.backgroundReplace = EventConfig.BackgroundReplaceOptions(enabled: true, backdropAssetName: "backdrop.png")
+                }
+            } else {
+                local.backgroundReplace = EventConfig.BackgroundReplaceOptions(enabled: false, backdropAssetName: nil)
+            }
+
+            if let stickerURLStrings = config.liveViewSettings.stickerURLs, !stickerURLStrings.isEmpty {
+                var assetNames: [String] = []
+                for (index, urlString) in stickerURLStrings.enumerated() {
+                    guard let url = URL(string: urlString) else { continue }
+                    let downloaded = try? await URLSession.shared.data(from: url)
+                    guard let imageData = downloaded?.0 else { continue }
+                    let filename = "sticker_\(index).png"
+                    if (try? EventStorage.shared.importLogoData(imageData, eventId: event.id, filename: filename)) != nil {
+                        assetNames.append(filename)
+                    }
+                }
+                // Only overwrite if at least one sticker actually downloaded —
+                // a total network blip must not wipe a working sticker set,
+                // same non-destructive-failure reasoning as overlay/logo.
+                if !assetNames.isEmpty {
+                    local.stickers = EventConfig.StickerOptions(enabled: true, assetNames: assetNames)
+                }
+            } else {
+                local.stickers = EventConfig.StickerOptions(enabled: false, assetNames: [])
+            }
         }
 
         try? EventStorage.shared.upsertEvent(local)
@@ -326,16 +377,20 @@ public enum RemoteSync {
             let shareAirdrop: Bool?
             let shareQrGallery: Bool?
             let shareEmail: Bool?
-            // Newer feature flags — pure settings that sync cleanly from the
-            // dashboard. Background-replace and stickers aren't here: they
-            // need asset files (backdrop/sticker PNGs) that are picked
-            // on-device in the Admin screen, not sent through this jsonb.
             let glamEnabled: Bool?
             let dataCaptureEnabled: Bool?
             let dataCaptureName: Bool?
             let dataCaptureEmail: Bool?
             let dataCapturePhone: Bool?
             let dataCaptureConsentText: String?
+            /// Brand colors, plus hosted URLs for logo/backdrop/stickers —
+            /// see importLogoData usage in merge() above for how these turn
+            /// into local assets.
+            let colorPrimaryHex: String?
+            let colorBackgroundHex: String?
+            let logoURL: String?
+            let backdropURL: String?
+            let stickerURLs: [String]?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
@@ -359,6 +414,11 @@ public enum RemoteSync {
                 case dataCaptureEmail = "data_capture_email"
                 case dataCapturePhone = "data_capture_phone"
                 case dataCaptureConsentText = "data_capture_consent_text"
+                case colorPrimaryHex = "color_primary_hex"
+                case colorBackgroundHex = "color_background_hex"
+                case logoURL = "logo_url"
+                case backdropURL = "backdrop_url"
+                case stickerURLs = "sticker_urls"
             }
         }
     }
