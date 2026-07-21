@@ -34,8 +34,8 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
     public var displayName: String {
         switch self {
         case .canonEOS: "Canon EOS"
-        case .sony: "Sony (beta)"
-        case .usbWebcam: "USB Webcam (tested)"
+        case .sony: "Sony"
+        case .usbWebcam: "USB Webcam"
         }
     }
 

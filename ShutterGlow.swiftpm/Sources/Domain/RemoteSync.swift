@@ -279,6 +279,15 @@ public enum RemoteSync {
                 backgroundHex: config.liveViewSettings.colorBackgroundHex ?? local.colors.backgroundHex
             )
 
+            // Logo / backdrop / stickers are "dashboard sets, never wipes."
+            // Unlike overlay (which the dashboard owns outright and can clear
+            // by blanking the field), all three of these are ALSO settable on
+            // the device's own Admin screen — an operator very likely has them
+            // configured locally with no dashboard equivalent ever entered. So
+            // an absent/blank dashboard field must preserve the on-device asset,
+            // never delete it. A present URL overrides; a blank one is a no-op.
+            // (If a dashboard operator needs to remove one of these, they clear
+            // it on the device — same as before these fields existed at all.)
             if let logoURLString = config.liveViewSettings.logoURL,
                let logoURL = URL(string: logoURLString) {
                 let downloaded = try? await URLSession.shared.data(from: logoURL)
@@ -286,10 +295,8 @@ public enum RemoteSync {
                    (try? EventStorage.shared.importLogoData(imageData, eventId: event.id, filename: "logo.png")) != nil {
                     local.logoAssetName = "logo.png"
                 }
-                // Download failure: keep whatever local already has, same
-                // reasoning as the overlay block above.
-            } else {
-                local.logoAssetName = nil
+                // Download failure falls through and keeps the existing local
+                // logo rather than blanking it over a transient error.
             }
 
             if let backdropURLString = config.liveViewSettings.backdropURL,
@@ -299,8 +306,6 @@ public enum RemoteSync {
                    (try? EventStorage.shared.importLogoData(imageData, eventId: event.id, filename: "backdrop.png")) != nil {
                     local.backgroundReplace = EventConfig.BackgroundReplaceOptions(enabled: true, backdropAssetName: "backdrop.png")
                 }
-            } else {
-                local.backgroundReplace = EventConfig.BackgroundReplaceOptions(enabled: false, backdropAssetName: nil)
             }
 
             if let stickerURLStrings = config.liveViewSettings.stickerURLs, !stickerURLStrings.isEmpty {
@@ -315,13 +320,10 @@ public enum RemoteSync {
                     }
                 }
                 // Only overwrite if at least one sticker actually downloaded —
-                // a total network blip must not wipe a working sticker set,
-                // same non-destructive-failure reasoning as overlay/logo.
+                // a total network blip must not wipe a working sticker set.
                 if !assetNames.isEmpty {
                     local.stickers = EventConfig.StickerOptions(enabled: true, assetNames: assetNames)
                 }
-            } else {
-                local.stickers = EventConfig.StickerOptions(enabled: false, assetNames: [])
             }
         }
 
