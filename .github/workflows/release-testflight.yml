@@ -43,13 +43,41 @@ jobs:
         env:
           KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
           KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # altool and xcodebuild both look for the key in this exact
-          # location and filename shape, so write it there rather than
-          # passing a path around.
-          mkdir -p ~/private_keys
-          echo "$KEY_P8" | base64 --decode > ~/private_keys/AuthKey_${KEY_ID}.p8
-          chmod 600 ~/private_keys/AuthKey_${KEY_ID}.p8
+          # Secrets pasted through the GitHub UI very often carry a trailing
+          # newline or stray space. That produced an "ambiguous redirect" the
+          # first time this ran, because AuthKey_${KEY_ID}.p8 expanded to two
+          # words. Strip whitespace from every id here, once, and hand the
+          # cleaned values to later steps via GITHUB_ENV so nothing downstream
+          # touches the raw secret again. The base64 blob is stripped too:
+          # valid base64 contains no whitespace, so removing any pasted
+          # newlines is safe and fixes the same class of paste error.
+          CLEAN_KEY_ID=$(printf '%s' "$KEY_ID" | tr -d '[:space:]')
+          CLEAN_ISSUER_ID=$(printf '%s' "$ISSUER_ID" | tr -d '[:space:]')
+          CLEAN_TEAM_ID=$(printf '%s' "$TEAM_ID" | tr -d '[:space:]')
+
+          # altool and xcodebuild both look for the key at this exact path and
+          # filename shape, so write it there rather than passing a path around.
+          mkdir -p "$HOME/private_keys"
+          KEY_PATH="$HOME/private_keys/AuthKey_${CLEAN_KEY_ID}.p8"
+          printf '%s' "$KEY_P8" | tr -d '[:space:]' | base64 --decode > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+
+          # Fail loudly now if the decode produced junk, rather than letting
+          # xcodebuild fail later with a vaguer signing error.
+          if [ ! -s "$KEY_PATH" ]; then
+            echo "Decoded key is empty — check the APPSTORE_API_KEY_P8 secret" >&2
+            exit 1
+          fi
+
+          {
+            echo "CLEAN_KEY_ID=$CLEAN_KEY_ID"
+            echo "CLEAN_ISSUER_ID=$CLEAN_ISSUER_ID"
+            echo "CLEAN_TEAM_ID=$CLEAN_TEAM_ID"
+            echo "KEY_PATH=$KEY_PATH"
+          } >> "$GITHUB_ENV"
 
       - name: Set build number
         run: |
@@ -76,28 +104,22 @@ jobs:
 
       - name: Archive (signed)
         working-directory: ShutterGlow.swiftpm
-        env:
-          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          # Uses the cleaned values exported by the install step, never the
+          # raw secrets, so no downstream step can re-inherit a stray newline.
           xcodebuild \
             -scheme ShutterGlow \
             -destination 'generic/platform=iOS' \
             -configuration Release \
             -archivePath ../build/ShutterGlow.xcarchive \
             -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${KEY_ID}.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$CLEAN_KEY_ID" \
+            -authenticationKeyIssuerID "$CLEAN_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$CLEAN_TEAM_ID" \
             archive
 
       - name: Export .ipa
-        env:
-          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           cat > exportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -105,7 +127,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key><string>app-store-connect</string>
-            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>teamID</key><string>${CLEAN_TEAM_ID}</string>
             <key>uploadSymbols</key><true/>
             <key>signingStyle</key><string>automatic</string>
           </dict>
@@ -117,25 +139,23 @@ jobs:
             -exportPath build/export \
             -exportOptionsPlist exportOptions.plist \
             -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${KEY_ID}.p8 \
-            -authenticationKeyID "$KEY_ID" \
-            -authenticationKeyIssuerID "$ISSUER_ID"
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$CLEAN_KEY_ID" \
+            -authenticationKeyIssuerID "$CLEAN_ISSUER_ID"
           ls -la build/export
 
       - name: Upload to TestFlight
-        env:
-          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
-          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
         run: |
           IPA=$(find build/export -name "*.ipa" | head -n 1)
           test -n "$IPA" || { echo "no .ipa exported"; exit 1; }
           # --apiKey resolves against ~/private_keys, which is why the key
-          # was written there rather than to a temp path.
+          # was written there rather than to a temp path. Cleaned values from
+          # the install step, same as every other step.
           xcrun altool --upload-app \
             -f "$IPA" \
             -t ios \
-            --apiKey "$KEY_ID" \
-            --apiIssuer "$ISSUER_ID"
+            --apiKey "$CLEAN_KEY_ID" \
+            --apiIssuer "$CLEAN_ISSUER_ID"
 
       - name: Upload .ipa artifact
         uses: actions/upload-artifact@v4
