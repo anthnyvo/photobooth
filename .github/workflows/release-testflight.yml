@@ -1,0 +1,145 @@
+# Builds a SIGNED .ipa and uploads it to TestFlight.
+#
+# Deliberately separate from build-ipa.yml rather than replacing it: that
+# workflow produces the unsigned artifact used for AltStore sideloading, which
+# stays the fallback whenever signing or App Store Connect is having a bad day.
+#
+# Signing uses an App Store Connect API key rather than an exported .p12
+# distribution certificate plus a .mobileprovision file. Same result, far less
+# to manage: `-allowProvisioningUpdates` lets Xcode create and download the
+# signing assets itself from the key, and the same key authenticates the
+# upload, so there are no certificates to rotate by hand and nothing binary in
+# the repo secrets beyond the key itself.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   APPSTORE_API_KEY_P8   base64 of the .p8 file downloaded from App Store
+#                         Connect. Generate with:  base64 -i AuthKey_XXX.p8
+#   APPSTORE_API_KEY_ID   the key's Key ID
+#   APPSTORE_ISSUER_ID    the Issuer ID shown above the key list
+#   APPLE_TEAM_ID         10-character Team ID from developer.apple.com/account
+#
+# Prerequisites that must be done once in Apple's web UI or the upload fails
+# with an unhelpful error:
+#   1. Enrollment shows as active at developer.apple.com/account
+#   2. All agreements accepted in App Store Connect > Business
+#   3. App ID com.anthonyvo.shutterglow registered
+#   4. An app record created in App Store Connect for that bundle ID
+name: Release to TestFlight
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install App Store Connect API key
+        env:
+          KEY_P8: ${{ secrets.APPSTORE_API_KEY_P8 }}
+          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+        run: |
+          # altool and xcodebuild both look for the key in this exact
+          # location and filename shape, so write it there rather than
+          # passing a path around.
+          mkdir -p ~/private_keys
+          echo "$KEY_P8" | base64 --decode > ~/private_keys/AuthKey_${KEY_ID}.p8
+          chmod 600 ~/private_keys/AuthKey_${KEY_ID}.p8
+
+      - name: Set build number
+        run: |
+          # TestFlight rejects a build whose number it has already seen, and
+          # Package.swift hardcodes bundleVersion: "1". AppleProductTypes
+          # generates the Info.plist at build time, so overriding
+          # CURRENT_PROJECT_VERSION on the xcodebuild command line doesn't
+          # reach it — rewriting the manifest before the build is the way
+          # that actually takes effect.
+          cd ShutterGlow.swiftpm
+          sed -i '' "s/bundleVersion: \"[^\"]*\"/bundleVersion: \"${GITHUB_RUN_NUMBER}\"/" Package.swift
+          grep -n "bundleVersion" Package.swift
+
+      - name: Run unit tests
+        working-directory: ShutterGlow.swiftpm
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j \
+            | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; ids=[x['udid'] for k,v in d.items() if 'iOS' in k for x in v]; print(ids[0] if ids else '')")
+          if [ -z "$DEVICE_ID" ]; then
+            echo "No iOS simulator available on the runner" >&2
+            exit 1
+          fi
+          xcodebuild -scheme ShutterGlow -destination "id=$DEVICE_ID" test
+
+      - name: Archive (signed)
+        working-directory: ShutterGlow.swiftpm
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild \
+            -scheme ShutterGlow \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -archivePath ../build/ShutterGlow.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            archive
+
+      - name: Export .ipa
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          cat > exportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>uploadSymbols</key><true/>
+            <key>signingStyle</key><string>automatic</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/ShutterGlow.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist exportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"
+          ls -la build/export
+
+      - name: Upload to TestFlight
+        env:
+          KEY_ID: ${{ secrets.APPSTORE_API_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          IPA=$(find build/export -name "*.ipa" | head -n 1)
+          test -n "$IPA" || { echo "no .ipa exported"; exit 1; }
+          # --apiKey resolves against ~/private_keys, which is why the key
+          # was written there rather than to a temp path.
+          xcrun altool --upload-app \
+            -f "$IPA" \
+            -t ios \
+            --apiKey "$KEY_ID" \
+            --apiIssuer "$ISSUER_ID"
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ShutterGlow-signed-ipa
+          path: build/export/*.ipa
+          retention-days: 14
