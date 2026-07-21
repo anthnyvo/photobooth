@@ -11,15 +11,36 @@ import Foundation
 /// animations, square crop, overlay/logo/backdrop/sticker images, brand
 /// colors, AirDrop/QR/email share channels). Logo/backdrop/stickers use
 /// the same "dashboard stores a hosted URL, iPad downloads it on sync"
-/// mechanism as overlay — there's no Supabase Storage upload widget, so
-/// the dashboard operator hosts the image elsewhere and pastes the URL.
+/// mechanism as overlay. That URL now usually points at Supabase Storage,
+/// since the dashboard uploads images straight from the browser, but this
+/// side neither knows nor cares: any https URL works the same way.
 public enum RemoteSync {
     private static let projectURL = SupabaseAuth.projectURL
     private static let anonKey = SupabaseAuth.anonKey
 
+    /// Distinguishes *why* a sync failed. Previously every failure collapsed
+    /// into a single "couldn't sync" string, which meant an expired session
+    /// (fixed by signing out and back in, the common case after a sideload
+    /// re-sign) looked identical to a venue with no Wi-Fi. The attendant
+    /// standing at the booth is the one who has to act on this, so it needs
+    /// to say which.
     public enum SyncError: Error {
         case notSignedIn
         case network
+        case server(status: Int)
+
+        /// Attendant-facing text. Written as an instruction where there is
+        /// one, not a description of the internals.
+        public var attendantMessage: String {
+            switch self {
+            case .notSignedIn:
+                "Sign-in expired. Sign out and back in. Showing cached events."
+            case .network:
+                "No connection to the server. Showing cached events."
+            case .server(let status):
+                "Server refused the sync (\(status)). Showing cached events."
+            }
+        }
     }
 
     /// Deletes an event on the backend, for a remote (dashboard-synced)
@@ -147,10 +168,18 @@ public enum RemoteSync {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
+            DiagnosticLog.shared.log(.sync, "fetch failed (transport): \(path)")
             throw SyncError.network
         }
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse else {
             throw SyncError.network
+        }
+        guard http.statusCode == 200 else {
+            // A 401 here is the expired-session case; surfacing the status
+            // rather than folding it into "network" is what lets the booth
+            // tell the attendant to sign in again instead of blaming Wi-Fi.
+            DiagnosticLog.shared.log(.sync, "fetch failed (HTTP \(http.statusCode)): \(path)")
+            throw SyncError.server(status: http.statusCode)
         }
         return data
     }
@@ -286,9 +315,16 @@ public enum RemoteSync {
             // configured locally with no dashboard equivalent ever entered. So
             // an absent/blank dashboard field must preserve the on-device asset,
             // never delete it. A present URL overrides; a blank one is a no-op.
-            // (If a dashboard operator needs to remove one of these, they clear
-            // it on the device — same as before these fields existed at all.)
-            if let logoURLString = config.liveViewSettings.logoURL,
+            //
+            // Removing one is therefore an EXPLICIT act: the dashboard has a
+            // "Remove from booth" checkbox per asset which sets the *_cleared
+            // flag below. That keeps "I have nothing to say about this field"
+            // and "delete this" as two different signals, which is what stopped
+            // the earlier version of this code silently wiping booths branded
+            // on the iPad.
+            if config.liveViewSettings.logoCleared == true {
+                local.logoAssetName = nil
+            } else if let logoURLString = config.liveViewSettings.logoURL,
                let logoURL = URL(string: logoURLString) {
                 let downloaded = try? await URLSession.shared.data(from: logoURL)
                 if let imageData = downloaded?.0,
@@ -299,7 +335,9 @@ public enum RemoteSync {
                 // logo rather than blanking it over a transient error.
             }
 
-            if let backdropURLString = config.liveViewSettings.backdropURL,
+            if config.liveViewSettings.backdropCleared == true {
+                local.backgroundReplace = EventConfig.BackgroundReplaceOptions(enabled: false, backdropAssetName: nil)
+            } else if let backdropURLString = config.liveViewSettings.backdropURL,
                let backdropURL = URL(string: backdropURLString) {
                 let downloaded = try? await URLSession.shared.data(from: backdropURL)
                 if let imageData = downloaded?.0,
@@ -308,7 +346,9 @@ public enum RemoteSync {
                 }
             }
 
-            if let stickerURLStrings = config.liveViewSettings.stickerURLs, !stickerURLStrings.isEmpty {
+            if config.liveViewSettings.stickersCleared == true {
+                local.stickers = EventConfig.StickerOptions(enabled: false, assetNames: [])
+            } else if let stickerURLStrings = config.liveViewSettings.stickerURLs, !stickerURLStrings.isEmpty {
                 var assetNames: [String] = []
                 for (index, urlString) in stickerURLStrings.enumerated() {
                     guard let url = URL(string: urlString) else { continue }
@@ -393,6 +433,12 @@ public enum RemoteSync {
             let logoURL: String?
             let backdropURL: String?
             let stickerURLs: [String]?
+            /// Explicit removal signals from the dashboard's "Remove from
+            /// booth" checkboxes. Distinct from an absent URL, which means
+            /// preserve. Optional so older rows (which have neither) decode.
+            let logoCleared: Bool?
+            let backdropCleared: Bool?
+            let stickersCleared: Bool?
 
             enum CodingKeys: String, CodingKey {
                 case countdownSeconds = "countdown_seconds"
@@ -421,6 +467,9 @@ public enum RemoteSync {
                 case logoURL = "logo_url"
                 case backdropURL = "backdrop_url"
                 case stickerURLs = "sticker_urls"
+                case logoCleared = "logo_cleared"
+                case backdropCleared = "backdrop_cleared"
+                case stickersCleared = "stickers_cleared"
             }
         }
     }
