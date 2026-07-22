@@ -24,10 +24,18 @@ let package = Package(
                 .pad,
                 .phone
             ],
+            // All four orientations, including portraitUpsideDown, are
+            // required for an iPad app that supports multitasking, which App
+            // Store validation enforces. A Swift Playgrounds .iOSApplication
+            // product can't set UIRequiresFullScreen to opt out of
+            // multitasking, so the only way past the check is to declare all
+            // four. In practice the booth lives on a landscape stand; this is
+            // about satisfying validation, not inviting an upside-down kiosk.
             supportedInterfaceOrientations: [
                 .landscapeRight,
                 .landscapeLeft,
-                .portrait
+                .portrait,
+                .portraitUpsideDown
             ],
             capabilities: [
                 .camera(purposeString: "Connects to your camera over USB, and uses the iPad camera for USB webcam mode, to run the photo booth."),

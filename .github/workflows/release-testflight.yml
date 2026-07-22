@@ -37,7 +37,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app || sudo xcode-select -s /Applications/Xcode.app
+        run: |
+          # App Store upload now requires the app to be built with the iOS 26
+          # SDK (Xcode 26+); a build from Xcode 16.4's iOS 18.5 SDK is rejected
+          # at validation. Pick the newest Xcode the runner has rather than
+          # pinning a version, so this keeps working as the image updates.
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LATEST" ]; then LATEST=/Applications/Xcode.app; fi
+          echo "Selecting $LATEST"
+          sudo xcode-select -s "$LATEST"
+          xcodebuild -version
 
       - name: Install App Store Connect API key
         env:
