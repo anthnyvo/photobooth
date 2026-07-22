@@ -36,9 +36,14 @@ struct CaptureView: View {
                     )
                     .sensoryFeedback(.impact(weight: .light), trigger: remaining)
             case .capturing:
-                // Fully opaque — at 0.9 the dark live feed bled through and
-                // read as a rendering bug rather than a flash.
-                Color.white.ignoresSafeArea()
+                // A brief white pop that fades to reveal the frame, NOT a
+                // solid white block held for the whole capture. Post-capture
+                // compositing (green screen, polaroid, encode) runs off-main
+                // while step stays .capturing, and sitting on opaque white for
+                // those seconds read as the app hanging. The flash fades fast
+                // and a "Developing" cue takes over only if processing runs
+                // long, so the guest sees motion the whole time.
+                ShutterFlash()
                     .transition(.opacity)
             case .recording:
                 // Boomerang/GIF recording — live view stays fully visible
@@ -79,6 +84,50 @@ struct CaptureView: View {
         // moment of the whole experience
         .sensoryFeedback(.impact(weight: .heavy), trigger: isCapturing)
         .task { await model.runLivePropOverlayLoop() }
+    }
+}
+
+/// The shutter flash: an instant white pop that fades out over a quarter
+/// second to reveal the frame underneath, then — only if the capture is still
+/// processing a beat later — a small "Developing" cue. This replaces holding
+/// an opaque white screen for the entire post-capture compositing pass, which
+/// looked like the app had frozen. A fast single shot flips to the review
+/// screen before the "Developing" cue ever appears.
+private struct ShutterFlash: View {
+    @State private var flash = 1.0
+    @State private var showDeveloping = false
+
+    var body: some View {
+        ZStack {
+            Color.white.opacity(flash).ignoresSafeArea()
+
+            if showDeveloping {
+                VStack {
+                    Spacer()
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .tint(Chassis.textPrimary)
+                        ChassisLabel(text: "Developing", size: 13)
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 20)
+                    .chassisPanel(cornerRadius: 20)
+                    .padding(.bottom, 44)
+                }
+                .transition(.opacity)
+            }
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.28)) { flash = 0 }
+            Task {
+                // 1s, deliberately longer than the ~800ms repose gap between
+                // strip shots (which also sits in .capturing) so the cue never
+                // flashes there — it only appears when real compositing runs
+                // long on the final shot.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                withAnimation(.easeIn(duration: 0.2)) { showDeveloping = true }
+            }
+        }
     }
 }
 

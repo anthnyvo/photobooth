@@ -31,7 +31,11 @@ enum PhotoCompositor {
         }
 
         let request = VNGeneratePersonSegmentationRequest()
-        request.qualityLevel = .balanced
+        // .fast, not .balanced: this is the single most expensive step in the
+        // whole capture pipeline, and it runs while the guest waits on the
+        // flash screen. At a booth print's size the edge quality difference is
+        // not worth the extra second per shot — speed wins here.
+        request.qualityLevel = .fast
         request.outputPixelFormat = kCVPixelFormatType_OneComponent8
         let handler = VNImageRequestHandler(cgImage: baseCG, options: [:])
         guard (try? handler.perform([request])) != nil,
