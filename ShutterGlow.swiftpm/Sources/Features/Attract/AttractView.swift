@@ -1,24 +1,63 @@
 import SwiftUI
 
 /// Idle/attract screen — loops live view as a backdrop with the guest's
-/// choices organized into category tabs (Photo / Strips / Animated /
-/// Filters / Props — only what the event enables). One category's options
-/// are visible at a time, each drawn as a miniature of what the guest
-/// actually gets; the Start pill confirms. Future guest-facing choices
-/// should join this system as new categories, not new stacked rows.
+/// choices split into two clearly separate zones:
+///
+///   FORMAT  — what the guest gets: Single Photo / a strip option / an
+///             animated style (Boomerang, GIF). Exactly one, always chosen,
+///             shown right on the Start button.
+///   STYLE   — how it looks: Filters / Props / Stickers. Additive, optional.
+///
+/// The split exists because the two are different kinds of choice, and a
+/// previous single-tab design let them bleed together: merely tapping into
+/// the Animated tab committed the GIF format, and then styling never reset
+/// it, so a guest who picked a filter could hit Start and get a GIF they
+/// never asked for. Format and style are now independent — a style pick can
+/// never change the format, and the Start button always names the format it
+/// will actually run.
 struct AttractView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
-    /// Pick-then-confirm: tapping a mode highlights it; only the Start pill
-    /// actually begins the session. Defaults to Single Photo.
+    /// Pick-then-confirm: tapping a format marks it; only Start begins the
+    /// session. Defaults to Single Photo, the safe default.
     @State private var selectedMode: Mode = .single
-    @State private var selectedCategory: Category = .photo
+    /// Which STYLE category's options are showing. Set on appear to the first
+    /// enabled one; nil only until then / when no style category is enabled.
+    @State private var selectedStyle: StyleCategory?
     @State private var entered = false
 
-    /// Whether anything is choosable at all — with every category off, the
-    /// screen keeps the plain shutter-ring/tap-anywhere flow instead.
+    /// Every capture format the event offers. Single is always available;
+    /// strips and animated join only when enabled. More than one means the
+    /// FORMAT row is worth showing; exactly one (plain single photo) means
+    /// there's nothing to pick and the Start button just says so.
+    private var formatModes: [Mode] {
+        var modes: [Mode] = [.single]
+        if model.config.strip.enabled { modes += stripOptions.map(Mode.strip) }
+        if model.config.animationsEnabled { modes += AnimatedStyle.allCases.map(Mode.animated) }
+        return modes
+    }
+
+    /// Only the STYLE categories the event actually enables.
+    private var styleCategories: [StyleCategory] {
+        var result: [StyleCategory] = []
+        if model.config.filtersEnabled { result.append(.filters) }
+        if model.config.ai.props { result.append(.props) }
+        if model.config.stickers.enabled && !model.config.stickers.assetNames.isEmpty {
+            result.append(.stickers)
+        }
+        return result
+    }
+
+    /// Whether anything is choosable at all. With a single format and no
+    /// styles, the screen keeps the plain shutter-ring/tap-anywhere flow.
     private var hasPicker: Bool {
-        categories.count > 1
+        formatModes.count > 1 || !styleCategories.isEmpty
+    }
+
+    /// The style category to render options for right now — the explicit
+    /// pick, falling back to the first enabled one before onAppear runs.
+    private var activeStyle: StyleCategory? {
+        selectedStyle ?? styleCategories.first
     }
 
     var body: some View {
@@ -40,35 +79,45 @@ struct AttractView: View {
                 }
 
                 if hasPicker {
-                    VStack(spacing: 22) {
-                        // Category tabs — switching shows only that
-                        // category's options, nothing else stacks up.
-                        // ViewThatFits centers the row when it fits the
-                        // screen (the common iPad case) and only falls back
-                        // to a left-starting scroll when an event enables
-                        // enough categories to overflow.
-                        ViewThatFits(in: .horizontal) {
-                            categoryTabs
-                            ScrollView(.horizontal, showsIndicators: false) { categoryTabs }
+                    VStack(spacing: 20) {
+                        // FORMAT zone — exclusive, only shown when there's
+                        // more than one to choose. With just Single Photo the
+                        // Start button already names it, so a one-item row
+                        // would be noise.
+                        if formatModes.count > 1 {
+                            VStack(spacing: 10) {
+                                ChassisLabel(text: "Format", size: 11)
+                                ViewThatFits(in: .horizontal) {
+                                    formatRow
+                                    ScrollView(.horizontal, showsIndicators: false) { formatRow }
+                                }
+                            }
+                            .entrance(entered, delay: 0.05)
                         }
-                        .entrance(entered, delay: 0.05)
 
-                        // Options slide in from the trailing edge when the
-                        // category changes — reads as flipping to the next
-                        // page rather than content teleporting. Same
-                        // fits-then-scrolls centering as the tabs above.
-                        ViewThatFits(in: .horizontal) {
-                            optionsRow
-                            ScrollView(.horizontal, showsIndicators: false) { optionsRow }
+                        // STYLE zone — additive; never touches the format.
+                        if let activeStyle {
+                            VStack(spacing: 10) {
+                                ChassisLabel(text: "Style", size: 11)
+                                if styleCategories.count > 1 {
+                                    ViewThatFits(in: .horizontal) {
+                                        styleTabs
+                                        ScrollView(.horizontal, showsIndicators: false) { styleTabs }
+                                    }
+                                }
+                                ViewThatFits(in: .horizontal) {
+                                    styleRow(activeStyle)
+                                    ScrollView(.horizontal, showsIndicators: false) { styleRow(activeStyle) }
+                                }
+                                .animation(.spring(duration: 0.45, bounce: 0.12), value: activeStyle)
+                            }
+                            .entrance(entered, delay: 0.1)
                         }
-                        .animation(.spring(duration: 0.45, bounce: 0.12), value: selectedCategory)
-                        .entrance(entered, delay: 0.1)
                     }
 
-                    // The confirm step — every pick above only marks a
-                    // choice, this actually starts the session with the
-                    // selected mode (plus whatever filter/prop is set).
-                    PillButton(title: "Start") {
+                    // Confirm step — always names the format it will run, so
+                    // the guest sees exactly what they'll get before it fires.
+                    PillButton(title: "Start · \(title(for: selectedMode))") {
                         switch selectedMode {
                         case .single:
                             model.tapToStart()
@@ -128,39 +177,61 @@ struct AttractView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             // Tap-anywhere is a shortcut for the single shutter button; once
-            // any picker category is offered, starting requires the explicit
+            // any picker is offered, starting requires the explicit
             // pick-then-Start flow instead, so this no-ops there.
             guard !hasPicker else { return }
             model.tapToStart()
         }
-        .onAppear { entered = true }
+        .onAppear {
+            entered = true
+            if selectedStyle == nil { selectedStyle = styleCategories.first }
+        }
         .task { await model.runLivePropOverlayLoop() }
         // Light haptic tick on every pick — selection should feel physical.
         .sensoryFeedback(.selection, trigger: selectedMode)
-        .sensoryFeedback(.selection, trigger: selectedCategory)
+        .sensoryFeedback(.selection, trigger: selectedStyle)
         .sensoryFeedback(.selection, trigger: model.selectedFilter)
         .sensoryFeedback(.selection, trigger: model.selectedProp)
+        .sensoryFeedback(.selection, trigger: model.selectedSticker)
     }
 
-    // MARK: - Category tabs / options rows
+    // MARK: - FORMAT row
 
-    /// Extracted so ViewThatFits above can measure/build the identical
-    /// content both bare (centers when it fits) and inside a ScrollView
-    /// (left-starting fallback when it doesn't) without duplicating markup.
+    /// Extracted so ViewThatFits can measure/build the identical content both
+    /// bare (centers when it fits) and inside a ScrollView (left-starting
+    /// fallback when it doesn't) without duplicating markup.
     @ViewBuilder
-    private var categoryTabs: some View {
+    private var formatRow: some View {
+        HStack(spacing: 22) {
+            ForEach(formatModes, id: \.self) { mode in
+                ModePreviewCard(
+                    title: title(for: mode),
+                    isSelected: selectedMode == mode,
+                    action: { selectedMode = mode }
+                ) {
+                    art(for: mode)
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+    }
+
+    // MARK: - STYLE tabs / rows
+
+    @ViewBuilder
+    private var styleTabs: some View {
         HStack(spacing: 14) {
-            ForEach(categories, id: \.self) { category in
+            ForEach(styleCategories, id: \.self) { category in
                 Button {
-                    selectCategory(category)
+                    selectedStyle = category
                 } label: {
                     Text(category.rawValue)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(selectedCategory == category ? Color.black : Chassis.textPrimary)
+                        .foregroundStyle(activeStyle == category ? Color.black : Chassis.textPrimary)
                         .padding(.vertical, 14)
                         .padding(.horizontal, 26)
                         .background(
-                            Capsule().fill(selectedCategory == category
+                            Capsule().fill(activeStyle == category
                                 ? AnyShapeStyle(Color.white)
                                 : AnyShapeStyle(.ultraThinMaterial))
                         )
@@ -173,13 +244,13 @@ struct AttractView: View {
     }
 
     @ViewBuilder
-    private var optionsRow: some View {
+    private func styleRow(_ category: StyleCategory) -> some View {
         HStack(spacing: 22) {
-            categoryContent
+            styleContent(category)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 6)
-        .id(selectedCategory)
+        .id(category)
         .transition(
             .asymmetric(
                 insertion: .move(edge: .trailing).combined(with: .opacity),
@@ -188,21 +259,9 @@ struct AttractView: View {
         )
     }
 
-    // MARK: - Category content
-
     @ViewBuilder
-    private var categoryContent: some View {
-        switch selectedCategory {
-        case .photo, .strips, .animated:
-            ForEach(modes(in: selectedCategory), id: \.self) { mode in
-                ModePreviewCard(
-                    title: title(for: mode),
-                    isSelected: selectedMode == mode,
-                    action: { selectedMode = mode }
-                ) {
-                    art(for: mode)
-                }
-            }
+    private func styleContent(_ category: StyleCategory) -> some View {
+        switch category {
         case .filters:
             ForEach(PhotoFilter.offered(glamEnabled: model.config.glam.enabled)) { filter in
                 ModePreviewCard(
@@ -262,38 +321,6 @@ struct AttractView: View {
         }
     }
 
-    /// Only categories the event actually enables appear.
-    private var categories: [Category] {
-        var result: [Category] = [.photo]
-        if model.config.strip.enabled { result.append(.strips) }
-        if model.config.animationsEnabled { result.append(.animated) }
-        if model.config.filtersEnabled { result.append(.filters) }
-        if model.config.ai.props { result.append(.props) }
-        if model.config.stickers.enabled && !model.config.stickers.assetNames.isEmpty {
-            result.append(.stickers)
-        }
-        return result
-    }
-
-    private func modes(in category: Category) -> [Mode] {
-        switch category {
-        case .photo: [.single]
-        case .strips: stripOptions.map(Mode.strip)
-        case .animated: AnimatedStyle.allCases.map(Mode.animated)
-        case .filters, .props, .stickers: []
-        }
-    }
-
-    /// Switching to a mode category auto-selects its first option so the
-    /// Start pill always fires something visible; filter/prop categories
-    /// leave the chosen mode alone — they're additive picks.
-    private func selectCategory(_ category: Category) {
-        selectedCategory = category
-        if let first = modes(in: category).first {
-            selectedMode = first
-        }
-    }
-
     private func title(for mode: Mode) -> String {
         switch mode {
         case .single: "Single Photo"
@@ -313,10 +340,9 @@ struct AttractView: View {
         }
     }
 
-    private enum Category: String, Hashable {
-        case photo = "Photo"
-        case strips = "Photo Strips"
-        case animated = "Animated"
+    /// STYLE categories only — the additive modifiers. Format lives in its
+    /// own `Mode` type so the two can never be confused for one another.
+    private enum StyleCategory: String, Hashable {
         case filters = "Filters"
         case props = "Props"
         case stickers = "Stickers"
