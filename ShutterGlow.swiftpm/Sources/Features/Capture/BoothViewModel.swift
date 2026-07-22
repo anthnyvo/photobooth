@@ -198,10 +198,21 @@ public final class BoothViewModel: ObservableObject {
     public func backToEventPicker() {
         eventConsumer?.cancel()
         eventConsumer = nil
+        liveViewConsumer?.cancel()
+        liveViewConsumer = nil
+        // Disconnect the camera itself, not just the transport. Nilling the
+        // camera without disconnecting leaked a live AVCaptureSession on the
+        // USB path — it kept running and holding the one external camera, so
+        // reconnecting later came up with no live view because the new
+        // session couldn't claim a device the orphaned one still owned.
+        let staleCamera = camera
         let staleTransport = transport
-        transport = nil
         camera = nil
-        Task { await staleTransport?.disconnect() }
+        transport = nil
+        Task {
+            await staleCamera?.disconnect()
+            await staleTransport?.disconnect()
+        }
         liveViewImage = nil
         cameraBatteryLevel = nil
         lastError = nil
@@ -211,32 +222,56 @@ public final class BoothViewModel: ObservableObject {
 
     // MARK: - Connection (attendant setup step)
 
+    /// True while a teardown+bring-up is mid-flight. A second tap of Connect
+    /// before the first finished used to spawn a second bring-up in parallel,
+    /// which on USB meant two AVCaptureSessions fighting over the one external
+    /// camera — the same "came up black" failure, just triggered by an
+    /// impatient double-tap instead of a stale session.
+    private var connectInFlight = false
+
     public func connectCamera() {
+        guard !connectInFlight else { return }
+        connectInFlight = true
         lastError = nil
         connectionMessage = "Connecting to \(cameraIPText)…"
 
-        // A re-tap (typo'd IP, impatience) must tear down the previous
-        // attempt first — otherwise the old transport's socket and event
-        // consumer leak and keep feeding stale connection state.
+        // A re-tap (typo'd IP, impatience), a back-out/return, or the
+        // capture-timeout self-heal all route through here, so the previous
+        // attempt must be torn down first. Crucially, WAIT for that teardown
+        // to finish before bringing up the new camera. The old code fired the
+        // disconnects off in detached Tasks and immediately started the new
+        // session/socket — a race that on the USB path let the previous
+        // AVCaptureSession still hold the one external camera when the new
+        // one called startRunning(), so the reconnect came up black.
         eventConsumer?.cancel()
         eventConsumer = nil
         liveViewConsumer?.cancel()
         liveViewConsumer = nil
-        if let staleCamera = camera {
-            camera = nil
-            Task { await staleCamera.disconnect() }
-        }
-        if let staleTransport = transport {
-            transport = nil
-            Task { await staleTransport.disconnect() }
-        }
+        let staleCamera = camera
+        let staleTransport = transport
+        camera = nil
+        transport = nil
 
+        let brand = selectedBrand
+        let host = cameraIPText
+        Task { [weak self] in
+            await staleCamera?.disconnect()
+            await staleTransport?.disconnect()
+            self?.bringUpCamera(brand: brand, host: host)
+            self?.connectInFlight = false
+        }
+    }
+
+    /// Second half of connectCamera, run only after the previous camera and
+    /// transport have fully disconnected. Kept separate so that ordering is
+    /// enforced by a single await chain rather than hoped for across detached
+    /// Tasks.
+    private func bringUpCamera(brand: CameraBrand, host: String) {
         // Sony speaks HTTP (Camera Remote API), not PTP/IP — no transport
         // handshake to wait on, so it jumps straight to the shared
         // remote-mode + live-view bring-up.
-        if selectedBrand == .sony {
-            transport = nil
-            guard let cam = SonyCamera(host: cameraIPText) else {
+        if brand == .sony {
+            guard let cam = SonyCamera(host: host) else {
                 lastError = "Couldn't connect — check the camera's IP address"
                 DiagnosticLog.shared.log(.camera, "connect failed: bad/unreachable IP")
                 connectionMessage = "Enter the camera's IP and connect"
@@ -252,8 +287,7 @@ public final class BoothViewModel: ObservableObject {
         // USB webcam mode is a wired UVC video feed, not a network
         // protocol — no IP, no transport handshake, same shared
         // remote-mode + live-view bring-up as Sony's HTTP path above.
-        if selectedBrand == .usbWebcam {
-            transport = nil
+        if brand == .usbWebcam {
             camera = UVCWebcamCamera()
             Task {
                 await startRemoteModeAndLiveView()
@@ -261,16 +295,11 @@ public final class BoothViewModel: ObservableObject {
             return
         }
 
-        let wifiTransport = PTPIPTransport(host: cameraIPText)
+        let wifiTransport = PTPIPTransport(host: host)
         transport = wifiTransport
-        let cam: any TetheredCamera
-        switch selectedBrand {
-        case .canonEOS: cam = EOSCamera(transport: wifiTransport)
-        case .sony, .usbWebcam: return // handled above
-        }
+        let cam = EOSCamera(transport: wifiTransport)
         camera = cam
 
-        eventConsumer?.cancel()
         eventConsumer = Task { [weak self] in
             for await event in wifiTransport.events {
                 await self?.handle(event)
