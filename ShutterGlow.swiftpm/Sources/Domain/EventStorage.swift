@@ -224,7 +224,13 @@ public final class EventStorage {
         var leads = loadLeads(eventId: eventId)
         leads.append(lead)
         guard let data = try? JSONEncoder().encode(leads) else { return }
-        try? data.write(to: leadsURL(eventId), options: .atomic)
+        // .completeFileProtection, not the default. This file is the one
+        // place on the booth holding guest names, emails and phone numbers.
+        // iOS's default class keeps data readable from first unlock until
+        // shutdown, and a booth iPad is unlocked for the entire event, so a
+        // device stolen mid-shift would give up the whole lead list. With
+        // this, the file is unreadable whenever the screen is locked.
+        try? data.write(to: leadsURL(eventId), options: [.atomic, .completeFileProtection])
     }
 
     public func loadLeads(eventId: String) -> [GuestLead] {
