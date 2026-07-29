@@ -1,4 +1,5 @@
 import SwiftUI
+import BoothStorage
 
 /// Event list, shown before camera connect — the attendant picks which
 /// client/event config is active, or creates a new one. Cards cascade in

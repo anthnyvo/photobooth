@@ -1,4 +1,5 @@
 import SwiftUI
+import BoothStorage
 
 /// Reads colors from the active EventConfig — no hardcoded branding colors
 /// anywhere in the guest-facing UI. The event's primary color is the single

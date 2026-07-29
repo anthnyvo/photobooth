@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import BoothStorage
 
 /// Optional lead/survey form shown before a guest gets their photos, when the
 /// event enables data capture. Collected contacts are stored LOCALLY per
