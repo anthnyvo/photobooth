@@ -71,6 +71,12 @@ struct AdminView: View {
     @State private var showingExport = false
     @State private var showingLeadExport = false
     @State private var leadExportURL: URL?
+    @State private var showingClearLeadsConfirm = false
+    @State private var showingPurgeLeadsConfirm = false
+    /// Bumped after a lead deletion purely to force the status card to
+    /// recompute. Its counts are read straight off disk during body
+    /// evaluation, so without this the tile still shows the old number.
+    @State private var leadsRevision = 0
     @State private var showingDiagExport = false
     @State private var diagExportURL: URL?
     @State private var currentPINEntry = ""
@@ -400,6 +406,28 @@ struct AdminView: View {
             Button("Delete Event", role: .destructive, action: deleteEvent)
             Button("Cancel", role: .cancel) {}
         }
+        .confirmationDialog(
+            clearLeadsPrompt,
+            isPresented: $showingClearLeadsConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Contacts", role: .destructive) {
+                EventStorage.shared.deleteLeads(eventId: model.config.eventId)
+                leadsRevision += 1
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            purgeLeadsPrompt,
+            isPresented: $showingPurgeLeadsConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete All Contacts", role: .destructive) {
+                EventStorage.shared.purgeAllLeads()
+                leadsRevision += 1
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .sheet(isPresented: $showingExport) {
             PhotoExportSheet(photoURLs: EventStorage.shared.listPhotos(eventId: model.config.eventId))
         }
@@ -457,12 +485,16 @@ struct AdminView: View {
     /// separate from whatever eventId is being typed into the form above, so
     /// editing the ID field doesn't make these numbers flicker to zero.
     private var statusCard: some View {
+        _ = leadsRevision // read so a deletion re-evaluates the counts below
         let activeId = model.config.eventId
         let photos = EventStorage.shared.listPhotos(eventId: activeId).count
         let prints = EventStorage.shared.printCount(eventId: activeId)
         let guests = EventStorage.shared.guestSessionCount(eventId: activeId)
         let leads = EventStorage.shared.leadCount(eventId: activeId)
         let storageGB = EventStorage.shared.remainingCapacityGB()
+        let holding = EventStorage.shared.eventsHoldingLeads()
+        let totalLeadsOnDevice = holding.reduce(0) { $0 + $1.count }
+        let otherEventsWithLeads = holding.filter { $0.eventId != activeId }.count
 
         return SetupCard(title: "Status") {
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
@@ -492,6 +524,41 @@ struct AdminView: View {
             .disabled(leads == 0)
             .opacity(leads == 0 ? 0.4 : 1)
 
+            // Deleting contacts is separate from deleting the event, which
+            // would take the photos with it. Until this existed the only way
+            // to remove guest details was to destroy the operator's work,
+            // so nothing ever got removed and every guest from every event
+            // stayed on the iPad indefinitely.
+            Button {
+                showingClearLeadsConfirm = true
+            } label: {
+                GlassActionLabel(icon: "person.crop.circle.badge.xmark", title: "Delete Contacts (\(leads))")
+            }
+            .buttonStyle(.plain)
+            .disabled(leads == 0)
+            .opacity(leads == 0 ? 0.4 : 1)
+
+            if let oldest = EventStorage.shared.oldestLeadDate(eventId: activeId) {
+                Text("Oldest contact on this event: \(Self.ageFormatter.localizedString(for: oldest, relativeTo: Date())).")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Device-wide, not event-scoped: the handover case. An iPad
+            // being sold, returned to a rental pool or handed to another
+            // operator should not carry the previous one's guest lists.
+            if otherEventsWithLeads > 0 {
+                Button {
+                    showingPurgeLeadsConfirm = true
+                } label: {
+                    GlassActionLabel(
+                        icon: "trash",
+                        title: "Delete Contacts on ALL Events (\(totalLeadsOnDevice))"
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+
             // Diagnostics are per-install, not per-event, so this one isn't
             // gated on the current event having data the way the two above
             // are. After something goes wrong at a real event this is the
@@ -512,6 +579,29 @@ struct AdminView: View {
         guard let url = DiagnosticLog.shared.exportFile() else { return }
         diagExportURL = url
         showingDiagExport = true
+    }
+
+    private static let ageFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
+
+    /// Both prompts name the count and say explicitly what survives. A
+    /// destructive confirmation that only says "are you sure" gets dismissed
+    /// by reflex, and the thing an attendant most needs to know here is that
+    /// the photos are not going anywhere.
+    private var clearLeadsPrompt: String {
+        let n = EventStorage.shared.leadCount(eventId: model.config.eventId)
+        return "Delete \(n) contact\(n == 1 ? "" : "s") from \"\(model.config.displayName)\"? "
+            + "Photos and settings are kept. Export first if you haven't. This cannot be undone."
+    }
+
+    private var purgeLeadsPrompt: String {
+        let holding = EventStorage.shared.eventsHoldingLeads()
+        let total = holding.reduce(0) { $0 + $1.count }
+        return "Delete all \(total) contact\(total == 1 ? "" : "s") across \(holding.count) event\(holding.count == 1 ? "" : "s") on this iPad? "
+            + "Every photo is kept. Use this when handing the device to someone else. This cannot be undone."
     }
 
     /// Writes the event's collected leads to a temp CSV and opens the share

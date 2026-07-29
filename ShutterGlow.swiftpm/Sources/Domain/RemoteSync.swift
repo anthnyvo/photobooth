@@ -134,6 +134,12 @@ public enum RemoteSync {
             guard let local = try? EventStorage.shared.load(eventId),
                   local.isRemote || UUID(uuidString: eventId) != nil else { continue }
             guard EventStorage.shared.listPhotos(eventId: eventId).isEmpty else { continue }
+            // Leads get the same protection as photos, and for a stronger
+            // reason: they have never been uploaded anywhere, so a sync that
+            // silently dropped them would destroy the only copy of contacts
+            // the operator collected and has not exported yet. An event with
+            // leads waits for a deliberate deletion in Admin.
+            guard EventStorage.shared.leadCount(eventId: eventId) == 0 else { continue }
             try? EventStorage.shared.deleteEvent(eventId)
         }
     }
