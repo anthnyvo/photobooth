@@ -1,4 +1,5 @@
 import SwiftUI
+import BoothStorage
 
 /// Idle/attract screen — loops live view as a backdrop with the guest's
 /// choices split into two clearly separate zones:

@@ -1,4 +1,5 @@
 import Foundation
+import BoothStorage
 
 /// Pulls events + booth configs from the shared Supabase backend and mirrors
 /// them into local EventStorage. Matches the local-first contract from the

@@ -1,5 +1,6 @@
 import SwiftUI
 import MessageUI
+import BoothStorage
 
 /// Share/print screen — every channel here is independently toggleable per
 /// event via EventConfig.share/.print, never hardcoded on.

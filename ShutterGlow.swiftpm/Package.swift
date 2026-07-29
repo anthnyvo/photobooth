@@ -61,11 +61,23 @@ let package = Package(
             name: "CameraKit",
             path: "Sources/CameraKit"
         ),
+        // Event config + on-disk storage, split out for the same reason as
+        // CameraKit: AppModule is wrapped in AppleProductTypes'
+        // .iOSApplication product and produces no importable module, so
+        // nothing inside it can be unit tested. EventStorage owns the guest
+        // lead file, which is the one place on the booth holding other
+        // people's personal data, and its delete paths were shipping
+        // compile-verified only. Both files import Foundation and nothing
+        // else, so this is a clean cut.
+        .target(
+            name: "BoothStorage",
+            path: "Sources/BoothStorage"
+        ),
         .executableTarget(
             name: "AppModule",
-            dependencies: ["CameraKit"],
+            dependencies: ["CameraKit", "BoothStorage"],
             path: "Sources",
-            exclude: ["CameraKit"],
+            exclude: ["CameraKit", "BoothStorage"],
             resources: [
                 .process("Assets.xcassets")
             ]
@@ -75,7 +87,7 @@ let package = Package(
         // Tests/AppModuleTests for the actual cases.
         .testTarget(
             name: "AppModuleTests",
-            dependencies: ["CameraKit"],
+            dependencies: ["CameraKit", "BoothStorage"],
             path: "Tests/AppModuleTests"
         )
     ]

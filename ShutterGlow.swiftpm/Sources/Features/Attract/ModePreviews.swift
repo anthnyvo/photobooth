@@ -1,4 +1,5 @@
 import SwiftUI
+import BoothStorage
 
 /// Miniature "what you'll get" previews for the attract screen's mode
 /// picker — a 3-shot vertical strip option shows an actual tiny 3-frame

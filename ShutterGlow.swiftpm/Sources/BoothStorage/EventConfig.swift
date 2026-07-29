@@ -72,7 +72,9 @@ public struct EventConfig: Codable, Sendable, Equatable {
             /// Shots arranged in a roughly square grid (ceil(sqrt(n)) columns).
             case grid
 
-            var displayName: String {
+            /// public because the attract screen renders it, and that lives
+            /// in AppModule on the other side of the BoothStorage boundary.
+            public var displayName: String {
                 switch self {
                 case .vertical: "Vertical"
                 case .horizontal: "Horizontal"

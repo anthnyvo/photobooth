@@ -2,6 +2,7 @@ import UIKit
 import CoreImage
 import CoreVideo
 import Vision
+import BoothStorage
 
 /// All pixel-level photo compositing — burning a branded overlay/frame onto
 /// the final file (not just showing it in the UI) and stacking multiple

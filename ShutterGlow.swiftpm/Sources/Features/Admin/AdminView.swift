@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import BoothStorage
 
 /// Config-builder: the attendant fills this in once, ahead of the event,
 /// per the pre-event branding conversation with the client. Submitting
