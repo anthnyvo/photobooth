@@ -1,5 +1,13 @@
 # Face props vs Snapchat lenses - research brief, 2026-07-29
 
+> **Status, 2026-07-29:** the recommendation in section 5 is **half done**
+> (PR #7). The pipeline exists, so a PNG named `prop-<case>` dropped into the
+> asset catalog is used automatically at a declared placement, and every prop
+> now casts a roll-corrected contact shadow whether drawn or textured. **The
+> artwork itself does not exist yet** and is the remaining half. Nothing else
+> in this brief has been acted on: section 7's open questions are all still
+> open, and two of them are now checks in the hardware dry run.
+
 Feeds the architect. No implementation detail here by design.
 
 Every capability claim carries a URL. Sections marked **[VENDOR]** are the
