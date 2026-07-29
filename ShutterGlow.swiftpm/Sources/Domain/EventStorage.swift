@@ -266,6 +266,49 @@ public final class EventStorage {
         loadLeads(eventId: eventId).count
     }
 
+    /// When the oldest lead on this event was captured, or nil if there are
+    /// none. Surfaced in Admin so an attendant can see what has been sitting
+    /// on the device rather than having to remember.
+    public func oldestLeadDate(eventId: String) -> Date? {
+        loadLeads(eventId: eventId).map(\.capturedAt).min()
+    }
+
+    /// Deletes this event's collected contacts and nothing else.
+    ///
+    /// Separate from `deleteEvent` on purpose. Until now the only way to
+    /// remove guest contact details was to delete the whole event, which
+    /// also destroyed the photos — so in practice nobody did it, and a booth
+    /// iPad accumulated every guest's name, email and phone from every event
+    /// it had ever run, indefinitely. Photos are the operator's work product;
+    /// leads are other people's personal data, and the two deserve different
+    /// lifetimes.
+    ///
+    /// Returns how many were removed so the caller can confirm the number
+    /// rather than claiming a vague success.
+    @discardableResult
+    public func deleteLeads(eventId: String) -> Int {
+        let count = leadCount(eventId: eventId)
+        guard count > 0 else { return 0 }
+        try? FileManager.default.removeItem(at: leadsURL(eventId))
+        return count
+    }
+
+    /// Every event id on this device that still holds contacts, with counts.
+    public func eventsHoldingLeads() -> [(eventId: String, count: Int)] {
+        listEventIds()
+            .map { ($0, leadCount(eventId: $0)) }
+            .filter { $0.1 > 0 }
+    }
+
+    /// Clears contacts across every event on the device, leaving all photos
+    /// and configuration intact. This is the handover case: an iPad being
+    /// sold, returned to a rental pool, or passed to a different operator
+    /// should not carry the previous one's guest lists with it.
+    @discardableResult
+    public func purgeAllLeads() -> Int {
+        eventsHoldingLeads().reduce(0) { $0 + deleteLeads(eventId: $1.eventId) }
+    }
+
     private func printCountKey(_ eventId: String) -> String {
         "com.anthonyvo.photobooth.printCount.\(eventId)"
     }
