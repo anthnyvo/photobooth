@@ -268,7 +268,7 @@ enum FacePropRenderer {
             image.draw(in: CGRect(origin: .zero, size: pixelSize))
             let cg = context.cgContext
             for face in faces {
-                draw(prop, on: face, in: cg)
+                draw(prop, on: face, in: cg, accuracy: accuracy)
             }
         }
         return rendered.jpegData(compressionQuality: 0.92) ?? photoData
@@ -305,7 +305,7 @@ enum FacePropRenderer {
         let overlay = UIGraphicsImageRenderer(size: pixelSize, format: format).image { context in
             let cg = context.cgContext
             for face in faces {
-                draw(prop, on: face, in: cg)
+                draw(prop, on: face, in: cg, accuracy: .live)
             }
         }
         return (overlay, smoother)
@@ -315,7 +315,18 @@ enum FacePropRenderer {
     /// eye center and rotated by the head's roll, so every shape below can
     /// assume an upright face with eyes on the horizontal axis — tilting
     /// your head tilts the prop with it.
-    private static func draw(_ prop: PhotoProp, on face: DetectedFace, in cg: CGContext) {
+    ///
+    /// Two renderers live here. If artwork is bundled for this prop
+    /// (`PropArt.texture`) it is drawn at its declared placement and the drawn
+    /// path is skipped entirely. Otherwise the CoreGraphics shapes below run.
+    /// Both get the same contact shadow, so a prop does not visibly change
+    /// weight on the day its art lands.
+    private static func draw(
+        _ prop: PhotoProp,
+        on face: DetectedFace,
+        in cg: CGContext,
+        accuracy: FaceVision.Accuracy = .still
+    ) {
         let center = face.eyeCenter
         cg.saveGState()
         cg.translateBy(x: center.x, y: center.y)
@@ -339,6 +350,39 @@ enum FacePropRenderer {
         // Head top relative to the eye line — landmarks put the eye line
         // roughly 45% down the detection box.
         let localTop = -face.bounds.height * 0.55
+
+        // A contact shadow is the single cheapest thing that stops a prop
+        // reading as a sticker pasted on top. Offset is counter-rotated by
+        // roll so the shadow keeps falling DOWN in the photograph regardless
+        // of how far the guest has tilted their head — a shadow that tilts
+        // with the prop is worse than no shadow, because it tells the eye the
+        // light source is attached to the face.
+        //
+        // Softer and further on stills than in the live preview: the still is
+        // what gets printed, and the live loop runs ~11 times a second where
+        // a large blur radius is the most expensive thing on the pass.
+        let blur: CGFloat = accuracy == .still ? d * 0.10 : d * 0.05
+        let drop = d * 0.07
+        cg.setShadow(
+            offset: CGSize(width: sin(face.roll) * drop, height: cos(face.roll) * drop),
+            blur: blur,
+            color: UIColor.black.withAlphaComponent(0.32).cgColor
+        )
+
+        // Real artwork wins whenever it exists. Everything below is the
+        // fallback, and stays until every prop has a texture.
+        if prop != .none, let texture = PropArt.texture(for: prop) {
+            drawTexture(
+                texture,
+                placement: PropArt.placement(for: prop),
+                d: d,
+                mouth: localMouth,
+                top: localTop,
+                cg: cg
+            )
+            cg.restoreGState()
+            return
+        }
 
         switch prop {
         case .none:
@@ -365,6 +409,119 @@ enum FacePropRenderer {
             drawRainbow(d: d, mouth: localMouth, cg)
         }
         cg.restoreGState()
+    }
+
+    // MARK: - Artwork
+
+    /// Draws bundled art at its declared placement, in face-local space.
+    ///
+    /// Size comes from eye distance rather than the detection box, because
+    /// eye distance is the stabler of the two: the box breathes by a few
+    /// percent between frames as the landmark constellation shifts, and a
+    /// prop that resizes every frame is more obviously wrong than one sitting
+    /// slightly high.
+    private static func drawTexture(
+        _ texture: UIImage,
+        placement: PropPlacement,
+        d: CGFloat,
+        mouth: CGPoint,
+        top: CGFloat,
+        cg: CGContext
+    ) {
+        guard texture.size.width > 0, texture.size.height > 0 else { return }
+
+        let width = d * placement.widthInEyeDistances
+        let height = width * texture.size.height / texture.size.width
+
+        let anchor: CGPoint
+        switch placement.anchor {
+        case .eyeCenter: anchor = .zero
+        case .mouth: anchor = mouth
+        case .headTop: anchor = CGPoint(x: 0, y: top)
+        }
+
+        let origin = CGPoint(
+            x: anchor.x + placement.offset.dx * d - width * placement.pivot.x,
+            y: anchor.y + placement.offset.dy * d - height * placement.pivot.y
+        )
+
+        guard let cgImage = texture.cgImage else { return }
+        // Drawn through CoreGraphics rather than UIImage.draw so this works
+        // under whatever context the caller set up, and so the y-flip is
+        // explicit: CG's image space is bottom-up and face-local space is
+        // top-down like the rest of the renderer.
+        cg.saveGState()
+        cg.translateBy(x: origin.x, y: origin.y + height)
+        cg.scaleBy(x: 1, y: -1)
+        cg.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        cg.restoreGState()
+    }
+
+    // MARK: - Shading helpers for the drawn fallback
+    //
+    // Flat fills are what make the drawn props read as clip art. A vertical
+    // gradient and a highlight cost almost nothing and buy most of the
+    // difference between "shape" and "object". None of this is a substitute
+    // for real art; it is what the fallback looks like until art exists.
+
+    /// Fills a path with a vertical gradient from `top` to `bottom`, in
+    /// face-local space so the light stays above the head as it tilts.
+    private static func fill(_ path: CGPath, top: UIColor, bottom: UIColor, in cg: CGContext) {
+        let box = path.boundingBoxOfPath
+        guard box.height > 0,
+              let space = CGColorSpace(name: CGColorSpace.sRGB),
+              let gradient = CGGradient(
+                colorsSpace: space,
+                colors: [top.cgColor, bottom.cgColor] as CFArray,
+                locations: [0, 1]
+              )
+        else {
+            cg.setFillColor(top.cgColor)
+            cg.addPath(path)
+            cg.fillPath()
+            return
+        }
+        cg.saveGState()
+        cg.addPath(path)
+        cg.clip()
+        cg.drawLinearGradient(
+            gradient,
+            start: CGPoint(x: box.midX, y: box.minY),
+            end: CGPoint(x: box.midX, y: box.maxY),
+            options: []
+        )
+        cg.restoreGState()
+    }
+
+    /// A soft white highlight along the upper edge of a shape. Sells a curved
+    /// surface far more cheaply than any amount of extra path detail.
+    private static func highlight(_ path: CGPath, strength: CGFloat, in cg: CGContext) {
+        let box = path.boundingBoxOfPath
+        guard box.height > 0 else { return }
+        cg.saveGState()
+        // The caller's contact shadow is still set on this state. A highlight
+        // that casts its own shadow reads as grime, not shine.
+        cg.setShadow(offset: .zero, blur: 0, color: nil)
+        cg.addPath(path)
+        cg.clip()
+        cg.setBlendMode(.softLight)
+        fill(
+            CGPath(rect: CGRect(x: box.minX, y: box.minY, width: box.width, height: box.height * 0.55), transform: nil),
+            top: UIColor.white.withAlphaComponent(strength),
+            bottom: UIColor.white.withAlphaComponent(0),
+            in: cg
+        )
+        cg.restoreGState()
+    }
+
+    /// Lighter and darker variants of a base colour, for the gradient ends.
+    private static func shades(_ base: UIColor, lift: CGFloat = 0.16) -> (UIColor, UIColor) {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard base.getHue(&h, saturation: &s, brightness: &b, alpha: &a) else { return (base, base) }
+        return (
+            UIColor(hue: h, saturation: max(0, s - lift * 0.35), brightness: min(1, b + lift), alpha: a),
+            UIColor(hue: h, saturation: min(1, s + lift * 0.2), brightness: max(0, b - lift), alpha: a)
+        )
     }
 
     // MARK: - Individual props (face-local space: origin at eye center,
@@ -459,9 +616,9 @@ enum FacePropRenderer {
         path.addLine(to: CGPoint(x: leftX + width, y: baseY))
         path.close()
 
-        cg.setFillColor(gold.cgColor)
-        cg.addPath(path.cgPath)
-        cg.fillPath()
+        let (goldLight, goldDark) = shades(gold, lift: 0.22)
+        fill(path.cgPath, top: goldLight, bottom: goldDark, in: cg)
+        highlight(path.cgPath, strength: 0.5, in: cg)
 
         cg.setFillColor(UIColor(red: 0.85, green: 0.22, blue: 0.30, alpha: 0.97).cgColor)
         let dotR = d * 0.09
@@ -638,9 +795,9 @@ enum FacePropRenderer {
                 controlPoint: CGPoint(x: baseX + side * hornWidth * 0.95, y: baseY - hornHeight * 0.5)
             )
             path.close()
-            cg.setFillColor(red.cgColor)
-            cg.addPath(path.cgPath)
-            cg.fillPath()
+            let (light, dark) = shades(red, lift: 0.20)
+            fill(path.cgPath, top: light, bottom: dark, in: cg)
+            highlight(path.cgPath, strength: 0.35, in: cg)
         }
     }
 
