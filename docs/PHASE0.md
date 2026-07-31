@@ -78,6 +78,33 @@ no Phase 1 work starts.
 3. **Stop. Conversation with owner** — companion device or licensing Breeze/Cascable
    camera layer. Not a decision to make unilaterally (per brief §2).
 
+## ⚠️ 2026-07-31: the USB conclusion below is IN DOUBT — do not build on it
+
+Two things surfaced that the 2026-07-07 write-up did not account for:
+
+1. **Field evidence.** The owner has run an EOS R tethered to an iPad over USB with
+   working live view, using Snappic. Live view over USB on iOS is therefore not
+   impossible — it demonstrably ships.
+2. **Third-party evidence.** Cascable sells an iOS/iPadOS SDK doing full remote
+   control *including live view* over USB for Canon EOS and Nikon, and states that
+   Canon EOS "speak(s) (mostly) the same language over both WiFi and USB."
+
+And a specific, mundane candidate for our own bug: `requestSendPTPCommand`'s completion
+hands back **two** `NSData` blobs. `ICCTransport.send()` has always read the second and
+discarded the first with `_`. The symptom recorded below — "a clean `0x2001` response
+with a 0-byte payload" — is exactly what the *response container* looks like when the
+*data phase* came back in the other parameter.
+
+**Unproven.** The claim is not that this is the bug; it is that the test that would have
+distinguished the two was never run. `PassthroughDiagnostic` + the "Diagnose live view
+blob" button on the spike screen now run it: one `GetViewFinderData`, both blobs dumped,
+explicit verdict. Run that on the EOS R before treating anything in the section below as
+settled.
+
+If the frame turns up in the first parameter, the single-cable booth is real — live view
+*and* full-res capture *and* flash sync, and the Wi-Fi transport becomes the fallback
+rather than the primary.
+
 ## Outcome (2026-07-07): PASSED, via Wi-Fi PTP/IP, not USB
 
 **USB path: dead end, confirmed.** ImageCaptureCore's `requestSendPTPCommand(_:outData:completion:)`

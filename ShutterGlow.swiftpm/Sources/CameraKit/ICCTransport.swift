@@ -20,6 +20,13 @@ public struct PTPTransactionResult: Sendable {
     /// Raw blob exactly as ImageCaptureCore returned it — Phase 0 needs this
     /// to learn the real shape of passthrough replies on the EOS R.
     public let rawInbound: Data
+    /// ImageCaptureCore's passthrough completion hands back TWO data blobs.
+    /// `rawInbound` above is the second one — the only one this code has ever
+    /// read. This is the first, which was discarded with `_` until now and is
+    /// the prime suspect for holding the live-view data phase. Empty on
+    /// PTPIPTransport, which speaks the wire protocol directly and has no
+    /// such split. See PassthroughDiagnostic.
+    public var rawFirstParam: Data = Data()
 }
 
 public enum TransportError: Error {
@@ -31,10 +38,14 @@ public enum TransportError: Error {
 }
 
 /// Wraps ICDeviceBrowser/ICCameraDevice. Sole ImageCaptureCore touchpoint in
-/// the codebase. USB live view's data phase turned out not to be retrievable
-/// through this API on iOS (Phase 0 finding) — PTPIPTransport is the Wi-Fi
-/// sibling that exists because of that, conforming to the same PTPTransport
-/// protocol so EOSCamera's logic is unchanged either way.
+/// the codebase. PTPIPTransport is the Wi-Fi sibling, conforming to the same
+/// PTPTransport protocol so EOSCamera's logic is unchanged either way.
+///
+/// Phase 0 concluded USB live view's data phase was unreachable on iOS and
+/// built the Wi-Fi transport because of it. That conclusion is IN DOUBT as of
+/// 2026-07-31 — Snappic and Cascable both ship USB live view on iOS, and the
+/// completion handler below returns two data blobs of which this code has only
+/// ever read one. See PassthroughDiagnostic and docs/PHASE0.md.
 public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
 
     private let browser = ICDeviceBrowser()
@@ -95,15 +106,27 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
             let command = container.encoded()
 
             return try await withCheckedThrowingContinuation { continuation in
-                camera.requestSendPTPCommand(command, outData: outData) { _, inData, error in
+                // Both parameters are captured now. `inData` (the second) is
+                // what every existing call path reads, so behaviour here is
+                // unchanged; `firstData` rides along untouched for
+                // PassthroughDiagnostic to inspect. Do NOT start feeding the
+                // first one into splitInboundBlob until the hardware test says
+                // which is which — guessing is what got us here.
+                camera.requestSendPTPCommand(command, outData: outData) { firstData, inData, error in
                     if let error {
                         continuation.resume(throwing: TransportError.sendFailed(underlying: error))
                         return
                     }
                     let blob = inData
+                    // `as Data?` rather than a plain `??`: ImageCaptureCore's
+                    // block has no nullability annotations, so this parameter
+                    // imports as Data, Data? or Data! depending on SDK, and
+                    // this form compiles (and stays nil-safe) in all three.
+                    let first = (firstData as Data?) ?? Data()
                     let (payload, response) = PTPContainer.splitInboundBlob(blob)
                     continuation.resume(returning: PTPTransactionResult(
-                        payload: payload, response: response, rawInbound: blob))
+                        payload: payload, response: response, rawInbound: blob,
+                        rawFirstParam: first))
                 }
             }
         }

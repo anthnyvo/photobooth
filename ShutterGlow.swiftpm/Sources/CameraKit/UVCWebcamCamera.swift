@@ -23,13 +23,19 @@ public enum UVCWebcamError: Error, LocalizedError {
 /// AVFoundation — iPadOS 17+'s `.external` AVCaptureDevice type. No vendor
 /// SDK, no PTP at all.
 ///
-/// This exists because PTP-based live view is a dead end on iOS (see
-/// docs/PHASE0.md — ImageCaptureCore's passthrough API never surfaces the
-/// bulk data phase `GetViewFinderData` needs, confirmed on hardware). UVC
-/// sidesteps that by not touching PTP for anything: live view AND capture
-/// both come from the same video stream, so there's no dependency on
-/// whether PTP and USB Streaming mode can even coexist on one cable
-/// (unconfirmed, and irrelevant to this path).
+/// This exists because Phase 0 concluded PTP-based live view was a dead end
+/// on iOS. That conclusion is IN DOUBT as of 2026-07-31 (see docs/PHASE0.md)
+/// and this path may turn out to be unnecessary. It stands on its own
+/// regardless: UVC touches no PTP at all, so live view AND capture come from
+/// the same video stream.
+///
+/// Worth recording, since it was researched on 2026-07-31 and is settled:
+/// UVC webcam mode and PTP are mutually exclusive on Sony, Canon and Nikon.
+/// All three make USB mode a one-of-N menu selection, and entering streaming
+/// tears the PTP function down — Nikon states it outright ("communications
+/// with the computer/smart device other than the streaming software"
+/// unavailable while streaming). So this path can never be combined with a
+/// PTP path over the same cable, whatever happens to the Phase 0 question.
 ///
 /// Real trade-off, not hidden: "capture" here freezes the newest video
 /// frame rather than firing the camera's actual mechanical shutter — no
