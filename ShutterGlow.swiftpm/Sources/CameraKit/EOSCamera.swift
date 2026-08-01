@@ -371,14 +371,49 @@ public actor EOSCamera {
             }
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
-        log("half-press settle: OLCInfoChanged \(sawOLCInfo ? "seen" : "never seen")")
+        // "never seen" here is close to meaningless and should not be read as
+        // the camera being silent: startEventLoop() is polling GetEvent
+        // concurrently and drains the same queue, so whichever poll lands
+        // first takes the record. Kept as a signal rather than a gate — the
+        // capture below does not depend on it.
+        log("half-press settle: OLCInfoChanged \(sawOLCInfo ? "seen" : "never seen (event loop may have drained it)")")
 
-        let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 1])
-        if let code = fullPress.response?.code, code != PTPResponseCode.ok {
+        // Second parameter is Canon's AF flag: 1 = skip AF, 0 = request AF.
+        // libgphoto2's reference always sends 0. This code sent 1 because AF
+        // appeared broken camera-wide, including on the physical shutter —
+        // which was really the transport discarding GetEvent's data phase and
+        // wedging the body's event queue, not anything about AF. That premise
+        // is gone, but "skip AF" may still be the right call for a
+        // manual-focus adapter, so try it first and fall back rather than
+        // swapping one guess for another. Whichever is accepted gets logged,
+        // so one hardware run settles it instead of two.
+        //
+        // DeviceBusy (0x2019) is explicitly a "try again" code in PTP, and was
+        // being treated as fatal. The body is legitimately busy here — live
+        // view is streaming ~28 frames a second through the same session.
+        var fullPressed = false
+        var lastCode: UInt16?
+        for afParam: UInt32 in [1, 0] {
+            let attempt = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, afParam])
+            let code = attempt.response?.code
+            if code == nil || code == PTPResponseCode.ok {
+                log("full press accepted (AF param \(afParam)\(afParam == 1 ? ", skip AF" : ", request AF"))")
+                fullPressed = true
+                break
+            }
+            lastCode = code
+            log(String(format: "ReleaseOn(full) AF param %u failed: 0x%04X", afParam, code!))
+            // Anything other than busy is a real refusal; retrying the other
+            // AF flag would just be noise on top of a different problem.
+            if code != PTPResponseCode.deviceBusy { break }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+
+        if !fullPressed {
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
             halfPressReleased = true
-            log(String(format: "ReleaseOn(full) failed: 0x%04X — half-press released", code))
-            throw EOSError.badResponse(operation: "ReleaseOn(full)", code: code)
+            log("half-press released after full-press failure")
+            throw EOSError.badResponse(operation: "ReleaseOn(full)", code: lastCode)
         }
 
         try await expectOK("ReleaseOff(full)",
