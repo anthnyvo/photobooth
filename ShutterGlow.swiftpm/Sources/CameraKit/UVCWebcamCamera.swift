@@ -24,12 +24,12 @@ public enum UVCWebcamError: Error, LocalizedError {
 /// SDK, no PTP at all.
 ///
 /// This exists because Phase 0 concluded PTP-based live view was a dead end
-/// on iOS. That conclusion is IN DOUBT as of 2026-07-31 (see docs/PHASE0.md)
+/// on iOS. That conclusion is IN DOUBT as of 2026-08-01 (see docs/PHASE0.md)
 /// and this path may turn out to be unnecessary. It stands on its own
 /// regardless: UVC touches no PTP at all, so live view AND capture come from
 /// the same video stream.
 ///
-/// Worth recording, since it was researched on 2026-07-31 and is settled:
+/// Worth recording, since it was researched on 2026-08-01 and is settled:
 /// UVC webcam mode and PTP are mutually exclusive on Sony, Canon and Nikon.
 /// All three make USB mode a one-of-N menu selection, and entering streaming
 /// tears the PTP function down — Nikon states it outright ("communications

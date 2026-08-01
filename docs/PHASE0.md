@@ -78,7 +78,7 @@ no Phase 1 work starts.
 3. **Stop. Conversation with owner** — companion device or licensing Breeze/Cascable
    camera layer. Not a decision to make unilaterally (per brief §2).
 
-## ⚠️ 2026-07-31: the USB conclusion below is IN DOUBT — do not build on it
+## ⚠️ 2026-08-01: the USB conclusion below is IN DOUBT — do not build on it
 
 Two things surfaced that the 2026-07-07 write-up did not account for:
 

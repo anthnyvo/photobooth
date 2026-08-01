@@ -43,7 +43,7 @@ public enum TransportError: Error {
 ///
 /// Phase 0 concluded USB live view's data phase was unreachable on iOS and
 /// built the Wi-Fi transport because of it. That conclusion is IN DOUBT as of
-/// 2026-07-31 — Snappic and Cascable both ship USB live view on iOS, and the
+/// 2026-08-01 — Snappic and Cascable both ship USB live view on iOS, and the
 /// completion handler below returns two data blobs of which this code has only
 /// ever read one. See PassthroughDiagnostic and docs/PHASE0.md.
 public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
