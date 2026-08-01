@@ -78,16 +78,26 @@ no Phase 1 work starts.
 3. **Stop. Conversation with owner** — companion device or licensing Breeze/Cascable
    camera layer. Not a decision to make unilaterally (per brief §2).
 
-## ⚠️ 2026-08-01: the USB conclusion below is IN DOUBT — do not build on it
+## ⚠️ 2026-08-01: the USB conclusion below is DISPROVEN
 
-Two things surfaced that the 2026-07-07 write-up did not account for:
+**Confirmed on this project's own gear: Cascable Studio delivers live view from the
+EOS R to the iPad over USB.** The 2026-07-07 finding that this is an iOS platform
+limitation is wrong. Two independent confirmations preceded the test — the owner had
+already run the same rig under Snappic, and Cascable's dated version history records
+USB tethering with full remote control on iOS since 5.2 (2020, Canon) and 6.1 (2021,
+Nikon).
 
-1. **Field evidence.** The owner has run an EOS R tethered to an iPad over USB with
-   working live view, using Snappic. Live view over USB on iOS is therefore not
-   impossible — it demonstrably ships.
-2. **Third-party evidence.** Cascable sells an iOS/iPadOS SDK doing full remote
-   control *including live view* over USB for Canon EOS and Nikon, and states that
-   Canon EOS "speak(s) (mostly) the same language over both WiFi and USB."
+**What remains open is narrower and purely ours: can `ImageCaptureCore` do it, or does
+Cascable reach the camera some other way?** Two USB routes exist on iPadOS that this
+project has never touched and that are not ImageCaptureCore: **DriverKit** (WWDC22,
+"Communicates With Drivers" entitlement) and **AccessoryTransportExtension** (iOS 26.4
+betas). If Cascable uses one of those, no amount of passthrough tuning reaches the same
+result.
+
+That makes the outcome bounded rather than binary. Best case, the data phase is in the
+parameter we discard and this is a one-line fix. Worst case, licensing CascableCore is
+a **proven** path rather than a hope — which is the fallback ladder's own slot 3, now
+with evidence behind it.
 
 And a specific, mundane candidate for our own bug: `requestSendPTPCommand`'s completion
 hands back **two** `NSData` blobs. `ICCTransport.send()` has always read the second and
@@ -95,15 +105,19 @@ discarded the first with `_`. The symptom recorded below — "a clean `0x2001` r
 with a 0-byte payload" — is exactly what the *response container* looks like when the
 *data phase* came back in the other parameter.
 
-**Unproven.** The claim is not that this is the bug; it is that the test that would have
-distinguished the two was never run. `PassthroughDiagnostic` + the "Diagnose live view
-blob" button on the spike screen now run it: one `GetViewFinderData`, both blobs dumped,
-explicit verdict. Run that on the EOS R before treating anything in the section below as
-settled.
+**Still unproven for our code**, and the test that would distinguish the two was never
+run. `PassthroughDiagnostic` + the "Diagnose live view blob" button on the spike screen
+now run it: one `GetViewFinderData`, both blobs dumped, explicit verdict.
 
 If the frame turns up in the first parameter, the single-cable booth is real — live view
-*and* full-res capture *and* flash sync, and the Wi-Fi transport becomes the fallback
-rather than the primary.
+*and* full-res capture *and* flash sync — and the Wi-Fi transport becomes the fallback
+rather than the primary. If it turns up in neither, ImageCaptureCore is genuinely not
+the route Cascable takes, and the decision moves to DriverKit / AccessoryTransport
+versus licensing CascableCore. Do not spend further effort tuning the passthrough on a
+negative result; that is the loop the 2026-07-07 conclusion came out of.
+
+Everything below this line is the 2026-07-07 record. Its USB verdict is superseded by
+the paragraph above; its Wi-Fi work all still stands and is what currently ships.
 
 ## Outcome (2026-07-07): PASSED, via Wi-Fi PTP/IP, not USB
 
@@ -114,7 +128,9 @@ It never surfaces the device-to-host bulk data phase `GetViewFinderData` needs �
 returned a clean `0x2001` response with a 0-byte payload, regardless of property tuning, poll
 cadence, or settle time. Capture and remote control both work fine over USB (they use
 ImageCaptureCore's normal file-catalog path, not this data-phase mechanism) — only live view
-is blocked, and it's an iOS platform limitation, not a Canon protocol detail.
+is blocked, and it's ~~an iOS platform limitation, not a Canon protocol detail~~ **DISPROVEN
+2026-08-01: Cascable Studio does exactly this on the same EOS R and iPad. Whether
+ImageCaptureCore specifically can is still open — see the correction above.**
 
 **Wi-Fi path: works, following the fallback ladder's #2 slot but via PTP/IP, not CCAPI**
 (CCAPI itself was ruled out first — Canon never added CCAPI support to the original 2018 EOS R
