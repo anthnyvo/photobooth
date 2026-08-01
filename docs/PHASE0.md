@@ -78,46 +78,70 @@ no Phase 1 work starts.
 3. **Stop. Conversation with owner** — companion device or licensing Breeze/Cascable
    camera layer. Not a decision to make unilaterally (per brief §2).
 
-## ⚠️ 2026-08-01: the USB conclusion below is DISPROVEN
+## ✅ 2026-08-01: FIXED — USB live view works. The conclusion below was wrong.
 
-**Confirmed on this project's own gear: Cascable Studio delivers live view from the
-EOS R to the iPad over USB.** The 2026-07-07 finding that this is an iOS platform
-limitation is wrong. Two independent confirmations preceded the test — the owner had
-already run the same rig under Snappic, and Cascable's dated version history records
-USB tethering with full remote control on iOS since 5.2 (2020, Canon) and 6.1 (2021,
-Nikon).
+`requestSendPTPCommand`'s completion hands back **two** `NSData` blobs. The **first** is
+the device-to-host data phase. `ICCTransport.send()` read only the second and discarded
+the first with `_`, so `payload` came back empty for every command that returns data.
 
-**What remains open is narrower and purely ours: can `ImageCaptureCore` do it, or does
-Cascable reach the camera some other way?** Two USB routes exist on iPadOS that this
-project has never touched and that are not ImageCaptureCore: **DriverKit** (WWDC22,
-"Communicates With Drivers" entitlement) and **AccessoryTransportExtension** (iOS 26.4
-betas). If Cascable uses one of those, no amount of passthrough tuning reaches the same
-result.
+The symptom that got recorded below — "a clean `0x2001` response with a 0-byte payload"
+— was never evidence of a missing data phase. It is what a PTP **response container**
+looks like on its own, because that is exactly what blob two is.
 
-That makes the outcome bounded rather than binary. Best case, the data phase is in the
-parameter we discard and this is a one-line fix. Worst case, licensing CascableCore is
-a **proven** path rather than a hope — which is the fallback ladder's own slot 3, now
-with evidence behind it.
+### The measurement (EOS R, 2026-08-01, `GetViewFinderData` 0x9153)
 
-And a specific, mundane candidate for our own bug: `requestSendPTPCommand`'s completion
-hands back **two** `NSData` blobs. `ICCTransport.send()` has always read the second and
-discarded the first with `_`. The symptom recorded below — "a clean `0x2001` response
-with a 0-byte payload" — is exactly what the *response container* looks like when the
-*data phase* came back in the other parameter.
+```
+param 1 (was discarded): 192153 bytes
+  head: 2C 00 00 00 FF FF FF FF 00 00 00 00 02 00 23 00 ...
+  PTP container: does NOT parse as one — raw payload
+  JPEG SOI found at offset 52
+  LiveViewParser EXTRACTED a 184321-byte frame (structured framing)
 
-**Still unproven for our code**, and the test that would distinguish the two was never
-run. `PassthroughDiagnostic` + the "Diagnose live view blob" button on the spike screen
-now run it: one `GetViewFinderData`, both blobs dumped, explicit verdict.
+param 2 (what we read): 20 bytes
+  PTP container: kind=response code=0x2001 txn=1680 (fills blob)
+  no JPEG anywhere
+```
 
-If the frame turns up in the first parameter, the single-cable booth is real — live view
-*and* full-res capture *and* flash sync — and the Wi-Fi transport becomes the fallback
-rather than the primary. If it turns up in neither, ImageCaptureCore is genuinely not
-the route Cascable takes, and the decision moves to DriverKit / AccessoryTransport
-versus licensing CascableCore. Do not spend further effort tuning the passthrough on a
-negative result; that is the loop the 2026-07-07 conclusion came out of.
+A 184KB live-view JPEG, every frame, in the parameter being thrown away. Reproduced
+twice in the same session. `LiveViewParser` decoded it via Canon's structured block
+framing on the first attempt — the parser was always correct, it was simply never handed
+anything.
 
-Everything below this line is the 2026-07-07 record. Its USB verdict is superseded by
-the paragraph above; its Wi-Fi work all still stands and is what currently ships.
+### The fix
+
+`PTPTransactionResult.from(dataPhase:responseBlob:)` — payload from blob one, response
+from blob two, falling back to the old single-blob split when there is no data phase so
+that capture and `SetRemoteMode`, which were never broken, behave identically.
+
+**This very likely repaired more than live view.** `GetEvent` (0x9116) also carries a
+data phase, so event polling over USB was blind too, and the 2026-07-07 conclusion that
+"only live view is blocked" was itself incomplete.
+
+### What this changes
+
+USB is now a viable primary transport: live view **and** full-res capture **and** flash
+sync on one cable. The Wi-Fi PTP/IP transport becomes the fallback rather than the
+primary. Nothing about `EOSCamera` or the protocol layer changed — they were correct all
+along, sitting on a transport that returned empty payloads.
+
+Not yet re-run on hardware with the fix in place. T3 over USB is still formally open
+until the frames actually appear on screen.
+
+### Why it took three weeks
+
+Worth keeping. The conclusion "iOS platform limitation" was reached by observing one
+API's behaviour through one of its two return values, and was then written into
+`PHASE0.md`, two source files and the vault as settled fact. Every later decision — the
+whole Wi-Fi transport, the UVC path's justification — cited it. Nothing re-derived it,
+because it read as already proven.
+
+It came apart only when the owner said he had run this exact rig with live view under
+Snappic. The first response to that was to explain it away. **A hardware observation
+from someone operating the gear outranks a repo doc, however confidently the doc is
+written.**
+
+Everything below this line is the 2026-07-07 record, left intact. Its USB verdict is
+superseded; its Wi-Fi work all still stands and currently ships.
 
 ## Outcome (2026-07-07): PASSED, via Wi-Fi PTP/IP, not USB
 
@@ -128,9 +152,9 @@ It never surfaces the device-to-host bulk data phase `GetViewFinderData` needs �
 returned a clean `0x2001` response with a 0-byte payload, regardless of property tuning, poll
 cadence, or settle time. Capture and remote control both work fine over USB (they use
 ImageCaptureCore's normal file-catalog path, not this data-phase mechanism) — only live view
-is blocked, and it's ~~an iOS platform limitation, not a Canon protocol detail~~ **DISPROVEN
-2026-08-01: Cascable Studio does exactly this on the same EOS R and iPad. Whether
-ImageCaptureCore specifically can is still open — see the correction above.**
+is blocked, and it's ~~an iOS platform limitation, not a Canon protocol detail~~ **WRONG.
+It was our own bug: the data phase was in the completion's first parameter, which this
+transport discarded. Fixed 2026-08-01 — see above.**
 
 **Wi-Fi path: works, following the fallback ladder's #2 slot but via PTP/IP, not CCAPI**
 (CCAPI itself was ruled out first — Canon never added CCAPI support to the original 2018 EOS R
@@ -151,7 +175,8 @@ per launch looks like a new, untrusted device every time).
 |------|------|--------|---------|-------|
 | 2026-07-07 | T1 (USB) | pass | — | camera found → ready, ImageCaptureCore catalog indexing ~9s on a full card |
 | 2026-07-07 | T2 (USB) | pass | — | SetRemoteMode/SetEventMode both 0x2001 OK |
-| 2026-07-07 | T3 (USB) | **FAIL** | 0.0 fps | GetViewFinderData data phase never returned — iOS ImageCaptureCore limitation, see Outcome above |
+| 2026-07-07 | T3 (USB) | ~~**FAIL**~~ **misdiagnosed** | 0.0 fps | Attributed to an iOS ImageCaptureCore limitation. It was our own bug — the data phase was in the completion's discarded first parameter. Fixed 2026-08-01; re-test pending |
+| 2026-08-01 | Passthrough shape (USB) | **pass** | 184KB/frame | `GetViewFinderData` param 1 = 192153 bytes with a decodable JPEG at offset 52; param 2 = 20-byte `0x2001` response. Reproduced twice |
 | 2026-07-07 | T4 (USB) | pass | 2.79s | RemoteRelease 0x910F, well inside 5s budget; CaptureDestination=Host fix avoided Err 70 |
 | 2026-07-07 | T5 (USB) | pass | — | mid-session USB drop (-21400) auto-recovered with no app restart |
 | 2026-07-07 | Connect (Wi-Fi/PTP-IP) | pass | ~1-2s | Init Command Ack → Init Event Ack → OpenSession, fixed client GUID |
