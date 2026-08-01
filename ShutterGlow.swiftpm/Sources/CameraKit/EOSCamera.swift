@@ -72,20 +72,22 @@ public actor EOSCamera {
             try await expectOK("SetEventMode",
                 await transport.send(code: CanonOp.setEventMode, parameters: [1]))
             startEventLoop()
-            // TEMPORARILY DISABLED for a diagnostic test: AF has been
-            // blocked camera-wide (remote AND physical shutter both) for
-            // the entire remote session on every prior build, and every
-            // theory involving EVFOutputDevice or the RemoteReleaseOn AF
-            // parameter has been ruled out on hardware. The only other
-            // thing enterRemoteMode() changes from the body's own defaults
-            // is this property (default read as 2/Card; we were forcing 4/
-            // Host). Leaving it untouched to isolate whether this is the
-            // actual variable before committing to redesigning capture
-            // retrieval around card storage.
-            // try await setProperty(CanonProp.captureDestination,
-            //                       CanonProp.captureDestinationHost,
-            //                       name: "CaptureDestination=Host")
-            log("CaptureDestination left at camera default (diagnostic test — see comment above)")
+            // Restored 2026-08-01. This was disabled while hunting a bug
+            // where AF was blocked camera-wide — remote AND physical shutter,
+            // for the whole remote session — which no AF setting explained,
+            // and CaptureDestination was the last remaining variable.
+            //
+            // It was never the variable. The real cause was the transport
+            // discarding every data phase (see PTPTransactionResult.from):
+            // GetEvent returned 0x2001 with an empty payload on every poll,
+            // so startEventLoop() below believed it was draining the queue
+            // and drained nothing. A Canon body whose event queue is never
+            // drained wedges, which is exactly what a dead physical shutter
+            // looks like. With the data phase read, events flow and the
+            // premise for disabling this is gone.
+            try await setProperty(CanonProp.captureDestination,
+                                  CanonProp.captureDestinationHost,
+                                  name: "CaptureDestination=Host")
             state = .connected
             log("remote mode active")
         } catch {
