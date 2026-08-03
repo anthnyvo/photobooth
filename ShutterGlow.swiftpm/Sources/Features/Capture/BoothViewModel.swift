@@ -258,7 +258,12 @@ public final class BoothViewModel: ObservableObject {
         let staleTransport = transport
         camera = nil
         transport = nil
-        Task {
+        // Held, not fired and forgotten. Backing out and immediately picking
+        // an event used to start a fresh browser while these restores were
+        // still in flight, and a Canon body whose exit sequence is interrupted
+        // stays in PC mode — the laptop icon on its screen, refusing to
+        // reconnect until power-cycled. connectCamera waits on this.
+        teardownTask = Task {
             await staleCamera?.disconnect()
             await staleTransport?.disconnect()
         }
@@ -281,6 +286,10 @@ public final class BoothViewModel: ObservableObject {
     /// camera — the same "came up black" failure, just triggered by an
     /// impatient double-tap instead of a stale session.
     private var connectInFlight = false
+
+    /// Teardown started by backToEventPicker. connectCamera awaits it, so a
+    /// new session can never open on top of a camera still being handed back.
+    private var teardownTask: Task<Void, Never>?
 
     /// Has an automatic USB attempt already run for this visit to the connect
     /// screen. Reset by backToEventPicker so a later visit tries again, but
@@ -344,11 +353,27 @@ public final class BoothViewModel: ObservableObject {
         let brand = selectedBrand
         let host = cameraIPText
         Task { [weak self] in
+            // Any teardown still running from backing out has to finish first.
+            // Opening a session on a camera mid-handback is what leaves an EOS
+            // stuck showing the PC icon.
+            await self?.teardownTask?.value
+            await self?.clearTeardownTask()
+
             await staleCamera?.disconnect()
             await staleTransport?.disconnect()
+
+            // Canon bodies need a beat between a closed session and a new
+            // enumeration; going straight back in is the other way to end up
+            // with a device that never re-reports.
+            try? await Task.sleep(nanoseconds: 600_000_000)
+
             self?.bringUpCamera(brand: brand, host: host)
             self?.connectInFlight = false
         }
+    }
+
+    private func clearTeardownTask() {
+        teardownTask = nil
     }
 
     /// Second half of connectCamera, run only after the previous camera and

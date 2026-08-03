@@ -602,29 +602,46 @@ public actor EOSCamera {
         // Bounded so a pulled cable cannot hang teardown: on the yanked-cable
         // path every send fails fast anyway, and the whole block is best
         // effort by design.
+        // Properties first, remote mode last — the body stops accepting
+        // property sets once it is out of remote mode, so the order is not
+        // interchangeable.
+        await bounded(seconds: 1.5) { [transport] in
+            _ = try? await transport.send(code: CanonOp.resetUILock)
+            var card = Data()
+            card.appendLE(UInt32(12))
+            card.appendLE(CanonProp.captureDestination)
+            card.appendLE(CanonProp.captureDestinationCard)
+            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
+            var evf = Data()
+            evf.appendLE(UInt32(12))
+            evf.appendLE(CanonProp.evfOutputDevice)
+            evf.appendLE(UInt32(0))
+            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
+        }
+
+        // Its own budget, deliberately. Sharing one with the restores above
+        // meant a slow property set could eat the whole allowance and this
+        // never ran — leaving the body in remote mode, showing the PC icon,
+        // and refusing to reconnect until power-cycled. Of everything in this
+        // teardown, this is the one that must not be skipped.
+        await bounded(seconds: 1.5) { [transport] in
+            _ = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
+        }
+        log("remote mode released")
+
+        state = .idle
+    }
+
+    /// Run `work`, giving up after `seconds`. Teardown also happens on the
+    /// yanked-cable path where every send hangs until it fails, and a booth
+    /// must not stall there.
+    private func bounded(seconds: Double, _ work: @escaping @Sendable () async -> Void) async {
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { [transport] in
-                _ = try? await transport.send(code: CanonOp.resetUILock)
-                var card = Data()
-                card.appendLE(UInt32(12))
-                card.appendLE(CanonProp.captureDestination)
-                card.appendLE(CanonProp.captureDestinationCard)
-                _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
-                var evf = Data()
-                evf.appendLE(UInt32(12))
-                evf.appendLE(CanonProp.evfOutputDevice)
-                evf.appendLE(UInt32(0))
-                _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
-                _ = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
-            }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
+            group.addTask { await work() }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
             await group.next()
             group.cancelAll()
         }
-
-        state = .idle
     }
 
     private func expectOK(_ operation: String, _ result: PTPTransactionResult) throws {
