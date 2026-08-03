@@ -78,7 +78,76 @@ no Phase 1 work starts.
 3. **Stop. Conversation with owner** — companion device or licensing Breeze/Cascable
    camera layer. Not a decision to make unilaterally (per brief §2).
 
-## ✅ 2026-08-01: FIXED — USB live view works. The conclusion below was wrong.
+## ✅ 2026-08-03: USB PASSES. Live view, capture, retrieval, one cable.
+
+**Connect → live view → trigger → retrieve now works entirely over USB**, which is
+what this document set out to prove and then wrongly concluded was impossible.
+
+| Test | Result | Numbers |
+|---|---|---|
+| Live view (USB) | pass | **30-36 fps** sustained, structured framing |
+| Capture round trip (USB) | pass | **1.94s** for a 6,089,569-byte full-res JPEG |
+| Release path | pass | bare `RemoteRelease` 0x910F, fires in ~3s |
+| Retrieval | pass | `ObjectAddedEx64` handle → `GetObjectInfo` + `GetObject` |
+
+For comparison the Wi-Fi PTP/IP path this project was rebuilt around gets 14 fps and
+2.79s. USB is faster on both, and needs no AP, no pairing and no pre-flight.
+
+**Still outstanding before this replaces the Wi-Fi path in the booth:** 20 consecutive
+captures (T4's real bar), 60-minute endurance (T6), and the 4-hour power question (T7).
+This work lives on `spike/usb-liveview-blob-diagnostic` and is not merged.
+
+### Four bugs, one root cause
+
+1. **The transport discarded the data phase.** `requestSendPTPCommand`'s completion
+   returns two blobs; the first is the data phase and the code read only the second.
+   Every command that returns data came back empty. Live view got no frames, `GetEvent`
+   drained nothing, property reads returned nothing. Fixed in
+   `PTPTransactionResult.from`.
+2. **`CaptureDestination=Host` stopped the shutter firing.** Host destination needs an
+   object-transfer handshake this app never implemented, so the body refused to release
+   at all — `DeviceBusy` on every release path tried. Now captures to card.
+3. **The camera was left reconfigured after disconnect.** Canon properties persist past
+   the USB session, so a body left on Host writes photos *nowhere*, physical shutter
+   included, silently, at a real event. `disconnect()` now restores them.
+4. **Retrieval watched the wrong channel.** `nextCapturedFile` waited on
+   ImageCaptureCore's file catalog, which never re-announced a shot taken mid-session,
+   while Canon's own event had already delivered the object handle.
+
+Only the first is really a root cause. Bugs 2-4 were invisible underneath it, because
+nothing could work until the data phase came back.
+
+### What this cost, and why
+
+Three weeks, an entire Wi-Fi transport, and a day of hardware iteration — because a
+single wrong inference got written down as fact and then cited instead of re-tested.
+
+The 2026-07-07 conclusion was reached by observing one API through one of its two
+return values. It was recorded here, in two source files and in the project vault as
+"an iOS platform limitation". Every later decision cited it. Nothing re-derived it.
+
+Worse, **every "we tried X and it made no difference" note in `EOSCamera.swift` was
+written while the transport was broken** — the AF investigation, the EVFOutputDevice
+comparisons, the CaptureDestination diagnostic. All of them measured a camera that
+could not have worked under any setting, and all of them concluded the setting was
+innocent. That accumulated "knowledge" then actively misdirected this work: the AF
+theory in particular sent the previous session chasing a lens.
+
+Two things broke the deadlock, and neither was reasoning:
+
+- **The owner said he had run this exact rig with live view under Snappic.** The first
+  response was to explain that away. It should have been to go looking.
+- **Cascable Studio's warning dialog** named the setting our own app had left on the
+  camera, which was simultaneously the reason the shutter would not fire and a
+  photo-loss bug waiting to happen at a live event.
+
+`0x910F` deserves a specific correction. The original T4 row recorded it working at
+2.79s. A comment later called it "a no-op, not implemented on EOS". Earlier today that
+comment looked confirmed, because with Host destination it acks `0x2001` and does
+nothing. It was the original record that was right: with Card destination it is the
+release path that fires, on the first try.
+
+## ~~2026-08-01: FIXED — USB live view works~~ (superseded by the section above)
 
 `requestSendPTPCommand`'s completion hands back **two** `NSData` blobs. The **first** is
 the device-to-host data phase. `ICCTransport.send()` read only the second and discarded
@@ -175,8 +244,10 @@ per launch looks like a new, untrusted device every time).
 |------|------|--------|---------|-------|
 | 2026-07-07 | T1 (USB) | pass | — | camera found → ready, ImageCaptureCore catalog indexing ~9s on a full card |
 | 2026-07-07 | T2 (USB) | pass | — | SetRemoteMode/SetEventMode both 0x2001 OK |
-| 2026-07-07 | T3 (USB) | ~~**FAIL**~~ **misdiagnosed** | 0.0 fps | Attributed to an iOS ImageCaptureCore limitation. It was our own bug — the data phase was in the completion's discarded first parameter. Fixed 2026-08-01; re-test pending |
+| 2026-07-07 | T3 (USB) | ~~**FAIL**~~ **misdiagnosed** | 0.0 fps | Attributed to an iOS ImageCaptureCore limitation. It was our own bug — the data phase was in the completion's discarded first parameter |
 | 2026-08-01 | Passthrough shape (USB) | **pass** | 184KB/frame | `GetViewFinderData` param 1 = 192153 bytes with a decodable JPEG at offset 52; param 2 = 20-byte `0x2001` response. Reproduced twice |
+| 2026-08-03 | T3 (USB) | **PASS** | 30-36 fps | Structured framing, sustained. Beats the Wi-Fi path's 14 fps |
+| 2026-08-03 | T4 (USB) | **PASS** | 1.94s | 6,089,569-byte JPEG. Release via bare 0x910F; retrieval via ObjectAddedEx64 handle + GetObject. Single capture only — the 20-consecutive bar is still untested |
 | 2026-07-07 | T4 (USB) | pass | 2.79s | RemoteRelease 0x910F, well inside 5s budget; CaptureDestination=Host fix avoided Err 70 |
 | 2026-07-07 | T5 (USB) | pass | — | mid-session USB drop (-21400) auto-recovered with no app restart |
 | 2026-07-07 | Connect (Wi-Fi/PTP-IP) | pass | ~1-2s | Init Command Ack → Init Event Ack → OpenSession, fixed client GUID |
