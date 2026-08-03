@@ -103,9 +103,34 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     private var currentWaiter: (continuation: CheckedContinuation<ICCameraFile, Error>, generation: Int)?
     private var waiterGeneration = 0
 
+    /// Direct log sink, separate from the `events` stream.
+    ///
+    /// Teardown logs used to go out as `.log` events, and BoothViewModel
+    /// cancels its event consumer before tearing down — so the entire ICC
+    /// half of teardown was emitted into a stream nobody was reading. Half
+    /// the picture was missing while chasing the PC-mode lockup.
+    private var directLog: (@Sendable (String) -> Void)?
+
+    public func setLogSink(_ sink: @escaping @Sendable (String) -> Void) {
+        directLog = sink
+    }
+
+    private func note(_ message: String) {
+        directLog?("[ICC] \(message)")
+        emit(.log(message))
+    }
+
     public override init() {
         super.init()
         browser.delegate = self
+    }
+
+    deinit {
+        // The camera stays in PC mode until the app releases the USB device,
+        // and iOS only does that when ImageCaptureCore's objects go away —
+        // force-quitting the app clears the icon, closing the session does
+        // not. So whether this actually runs is the whole question.
+        directLog?("[ICC] transport deallocated — USB device released")
     }
 
     public func start() {
@@ -140,7 +165,7 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
             return
         }
 
-        emit(.log("teardown: requesting ICC session close"))
+        note("teardown: requesting ICC session close")
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             closeWaiter = continuation
             camera.requestCloseSession()
@@ -152,9 +177,16 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         }
 
         browser.stop()
+        // Drop every reference ImageCaptureCore could still be holding.
+        // Closing the session is not what frees the USB device; releasing the
+        // objects is, and anything still pointing at this transport keeps the
+        // camera showing its PC icon until the app dies.
+        camera.delegate = nil
+        browser.delegate = nil
         self.camera = nil
         isReady = false
-        emit(.log("teardown: ICC session closed, browser stopped"))
+        eventContinuation?.finish()
+        note("teardown: ICC session closed, browser stopped, references dropped")
     }
 
     private var closeWaiter: CheckedContinuation<Void, Never>?
@@ -163,7 +195,7 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     private func resumeCloseWaiter(timedOut: Bool) {
         guard let waiter = closeWaiter else { return }
         closeWaiter = nil
-        if timedOut { emit(.log("session close timed out — continuing teardown")) }
+        if timedOut { note("teardown: session close TIMED OUT") }
         waiter.resume()
     }
 

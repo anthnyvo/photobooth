@@ -425,6 +425,7 @@ public final class BoothViewModel: ObservableObject {
         connectionMessage = "Looking for a camera…"
 
         let usb = ICCTransport()
+        usb.setLogSink { line in DiagnosticLog.shared.log(.camera, line) }
         transport = usb
         eventConsumer = Task { [weak self] in
             for await event in usb.events {
