@@ -344,6 +344,26 @@ public actor EOSCamera {
             log("focus mode at capture: not reported yet")
         }
 
+        // Take the body's UI before attempting any release, and give it back
+        // afterwards whatever happens.
+        //
+        // This is the one thing Canon's own EDSDK and libgphoto2 both do that
+        // this code never did. It fits the 2026-08-03 evidence precisely: the
+        // body accepted property sets, half-presses and event polls, and
+        // refused only the full press, with DeviceBusy, across four unrelated
+        // release sequences, in both AF and MF, with EVF up and torn down.
+        // "Busy" was never about focus or live view — it was the body saying
+        // it is being operated by a human.
+        //
+        // Failure is logged rather than thrown: if a body does not implement
+        // the opcode the ladder below should still get its chance.
+        let lock = try? await transport.send(code: CanonOp.setUILock)
+        log("SetUILock: \(code(of: lock))")
+        defer {
+            let transport = self.transport
+            Task { _ = try? await transport.send(code: CanonOp.resetUILock) }
+        }
+
         var attempts: [String] = []
 
         for method in ShutterMethod.allCases {

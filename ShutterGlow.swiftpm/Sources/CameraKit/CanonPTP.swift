@@ -9,6 +9,17 @@ public enum CanonOp {
     public static let setEventMode: UInt16 = 0x9115         // param: 1 = enable event reporting
     public static let getEvent: UInt16 = 0x9116             // poll; data phase = event records
 
+    /// Takes the body's UI away from the user for the duration of a remote
+    /// operation. Canon's EDSDK calls this before capture and libgphoto2's
+    /// ptp2 camlib does the same (ptp_canon_eos_setuilock). Without it an EOS
+    /// body can consider itself under user control and refuse the actual
+    /// release with DeviceBusy (0x2019) while still happily accepting
+    /// property sets, half-presses and event polls — which is exactly the
+    /// signature observed on the EOS R, 2026-08-03, across four different
+    /// release sequences.
+    public static let setUILock: UInt16 = 0x911B
+    public static let resetUILock: UInt16 = 0x911C
+
     // Capture
     public static let remoteRelease: UInt16 = 0x910F        // simple full release (older bodies)
     public static let remoteReleaseOn: UInt16 = 0x9128      // params: (1|2, 0) — 1 = half, 2 = full
