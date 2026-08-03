@@ -298,6 +298,10 @@ public actor EOSCamera {
 
     private func recordFocusMode(_ mode: UInt32) { lastFocusMode = mode }
 
+    /// Object handle of the most recent capture, taken from Canon's own
+    /// ObjectAdded/RequestObjectTransfer event.
+    private var lastCapturedHandle: UInt32?
+
     /// Trigger the shutter and return the resulting full-resolution image.
     public func capturePhoto() async throws -> Data {
         eventLoopTask?.cancel()
@@ -313,8 +317,46 @@ public actor EOSCamera {
                 startEventLoop()
             }
         }
+        lastCapturedHandle = nil
         try await triggerShutter()
+
+        // Prefer Canon's own object handle over waiting for ImageCaptureCore
+        // to notice a new file. ICC's catalog is populated at session open and
+        // does not reliably re-announce a shot taken mid-session — hardware
+        // 2026-08-03: the shutter fired, ObjectAddedEx64 arrived within three
+        // seconds carrying the handle, and ICC's file-added callback never
+        // came at all inside a 15s wait. PTPIPTransport has downloaded
+        // captures this way over Wi-Fi from the start; the only reason USB
+        // could not was that the transport discarded every data phase, so
+        // GetObject returned nothing to return.
+        if let handle = lastCapturedHandle {
+            do {
+                return try await downloadObject(handle)
+            } catch {
+                log("GetObject on handle 0x\(String(handle, radix: 16)) failed (\(error)); falling back to the file catalog")
+            }
+        }
         return try await transport.nextCapturedFile(timeout: 15)
+    }
+
+    /// Pull a captured image off the camera by its object handle.
+    private func downloadObject(_ handle: UInt32) async throws -> Data {
+        let info = try await transport.send(code: StandardPTPOp.getObjectInfo, parameters: [handle])
+        if info.payload.count >= 12 {
+            // Size lives at offset 8 of the ObjectInfo dataset: StorageID(4) +
+            // ObjectFormat(2) + ProtectionStatus(2) + ObjectCompressedSize(4).
+            log("object info: \(info.payload.readLE(UInt32.self, at: 8)) bytes reported")
+        }
+
+        let object = try await transport.send(code: StandardPTPOp.getObject, parameters: [handle])
+        if let code = object.response?.code, code != PTPResponseCode.ok {
+            throw EOSError.badResponse(operation: "GetObject", code: code)
+        }
+        guard !object.payload.isEmpty else {
+            throw EOSError.badResponse(operation: "GetObject (empty payload)", code: nil)
+        }
+        log("downloaded \(object.payload.count) bytes for handle 0x\(String(handle, radix: 16))")
+        return object.payload
     }
 
     /// Fire the shutter, and prove it fired.
@@ -499,7 +541,16 @@ public actor EOSCamera {
                     switch record.type {
                     case CanonEvent.objectAddedEx, CanonEvent.objectAddedEx64,
                          CanonEvent.requestObjectTransfer:
-                        log(String(format: "  object event 0x%04X (%d bytes)", record.type, record.payload.count))
+                        // Keep the handle. This poll is the only place it ever
+                        // appears — consuming the record and reporting a bare
+                        // "yes it fired" would leave the image identified by
+                        // nothing, and the download below with no way to ask
+                        // for it.
+                        if record.payload.count >= 4 {
+                            lastCapturedHandle = record.payload.readLE(UInt32.self, at: 0)
+                        }
+                        log(String(format: "  object event 0x%04X (%d bytes) handle 0x%08X",
+                                   record.type, record.payload.count, lastCapturedHandle ?? 0))
                         return true
                     case CanonEvent.olcInfoChanged:
                         log("  OLCInfoChanged (focus confirm) seen")
