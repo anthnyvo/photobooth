@@ -169,12 +169,14 @@ private struct ConnectView: View {
                     .animation(.easeOut(duration: 0.3), value: model.connectionMessage)
                     .entrance(entered, delay: 0.06)
 
-                // Hidden while a camera is being looked for on the cable.
-                // Landing straight on a brand picker and an IP box implies the
-                // operator has a decision to make, when most of the time the
-                // right answer is "a camera is already plugged in" and no
-                // input is needed at all. These appear only if that fails.
-                if !model.isProbingUSB {
+                // Shown only once the cable has been checked and come back
+                // empty. Gating on wifiFallbackVisible rather than
+                // !isProbingUSB is deliberate: isProbingUSB starts false, so
+                // the screen painted the picker and IP box for one frame
+                // before the probe flipped it, which is what "it still goes to
+                // the IP page first" was. This flag only ever becomes true
+                // after a completed, failed probe, so there is no such window.
+                if model.wifiFallbackVisible {
                 // Camera brand picker. Only three brands ship, all short
                 // labels, so they sit centered in one row rather than a
                 // left-aligned scroller.

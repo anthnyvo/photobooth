@@ -579,7 +579,7 @@ public actor EOSCamera {
 
     // MARK: - Teardown / recovery
 
-    public func disconnect() {
+    public func disconnect() async {
         // Hand the camera back before dropping the session. Canon properties
         // set over PTP PERSIST after the USB connection ends — an operator who
         // unplugs mid-session and then shoots the rest of the night on the
@@ -587,27 +587,43 @@ public actor EOSCamera {
         // reconfigured, with live view redirected and (before 2026-08-03)
         // capture destined for a host that is no longer there.
         //
-        // Best effort and fire-and-forget: disconnect is also called when the
-        // cable has already been pulled, where these sends simply fail. The
-        // point is the ordinary teardown path, not the yanked-cable one.
-        let transport = self.transport
-        Task {
-            _ = try? await transport.send(code: CanonOp.resetUILock)
-            var card = Data()
-            card.appendLE(UInt32(12))
-            card.appendLE(CanonProp.captureDestination)
-            card.appendLE(CanonProp.captureDestinationCard)
-            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
-            var evf = Data()
-            evf.appendLE(UInt32(12))
-            evf.appendLE(CanonProp.evfOutputDevice)
-            evf.appendLE(UInt32(0))
-            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
-            _ = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
-        }
-
+        // Stop the polling loops FIRST. Restoring properties underneath a live
+        // view poll running at 30fps means competing for the same session
+        // while it is being handed back.
         eventLoopTask?.cancel()
         liveViewTask?.cancel()
+
+        // Awaited, not fired into the dark. These used to run in a detached
+        // Task while the transport was already closing, so they raced the
+        // session teardown and frequently never landed — which is how a body
+        // could still end up left on Host, the exact failure this restore
+        // exists to prevent.
+        //
+        // Bounded so a pulled cable cannot hang teardown: on the yanked-cable
+        // path every send fails fast anyway, and the whole block is best
+        // effort by design.
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [transport] in
+                _ = try? await transport.send(code: CanonOp.resetUILock)
+                var card = Data()
+                card.appendLE(UInt32(12))
+                card.appendLE(CanonProp.captureDestination)
+                card.appendLE(CanonProp.captureDestinationCard)
+                _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
+                var evf = Data()
+                evf.appendLE(UInt32(12))
+                evf.appendLE(CanonProp.evfOutputDevice)
+                evf.appendLE(UInt32(0))
+                _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
+                _ = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+            await group.next()
+            group.cancelAll()
+        }
+
         state = .idle
     }
 

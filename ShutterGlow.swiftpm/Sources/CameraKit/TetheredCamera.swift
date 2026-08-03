@@ -16,7 +16,10 @@ public protocol TetheredCamera: Actor {
     func capturePhoto() async throws -> Data
     /// Battery updates, if the body ever reports one. Optional to honor.
     func setBatterySink(_ sink: @escaping @Sendable (UInt32) -> Void)
-    func disconnect()
+    /// Hand the camera back. Async because a correct teardown is ordered -
+    /// EOSCamera restores properties it changed and waits for them to land,
+    /// since a body left reconfigured writes photos nowhere.
+    func disconnect() async
 }
 
 /// Guest-facing camera brand choice on the connect screen. Canon (Wi-Fi

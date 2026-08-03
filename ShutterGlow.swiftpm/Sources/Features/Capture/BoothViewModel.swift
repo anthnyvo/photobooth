@@ -366,7 +366,12 @@ public final class BoothViewModel: ObservableObject {
         }
         usb.start()
 
-        for _ in 0..<12 {
+        // 5s rather than 3s. A cold start enumerates fast, but a RECONNECT —
+        // backing out of the booth and returning — has just torn a session
+        // down, and ImageCaptureCore is slower to re-report a device it was
+        // recently holding. Three seconds was short enough to miss it, which
+        // read as "it doesn't pick the camera up on reconnect".
+        for _ in 0..<20 {
             // PTP body — handle(.deviceFound) has already picked its driver.
             if usbCameraSeen { return }
 

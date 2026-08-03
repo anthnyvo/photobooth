@@ -118,12 +118,51 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     public func stop() {
         camera?.requestCloseSession()
         browser.stop()
+        camera = nil
+        isReady = false
     }
 
-    /// PTPTransport conformance. Same teardown as `stop()`, under the name
-    /// callers holding `any PTPTransport` can reach.
-    public func disconnect() {
-        stop()
+    /// PTPTransport conformance — and, unlike `stop()`, it WAITS for the
+    /// session to actually close.
+    ///
+    /// That wait is the difference between reconnecting and not.
+    /// `requestCloseSession` is asynchronous: fire it and immediately start a
+    /// fresh `ICDeviceBrowser` and the new browser comes up while the old
+    /// session is still tearing down, so the device is never re-reported and
+    /// the camera appears to have vanished. That is exactly what backing out
+    /// of the booth and reconnecting used to do.
+    ///
+    /// Timeout-guarded because disconnect also runs on the yanked-cable path,
+    /// where the close callback will never arrive.
+    public func disconnect() async {
+        guard let camera else {
+            browser.stop()
+            return
+        }
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            closeWaiter = continuation
+            camera.requestCloseSession()
+
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await self?.resumeCloseWaiter(timedOut: true)
+            }
+        }
+
+        browser.stop()
+        self.camera = nil
+        isReady = false
+    }
+
+    private var closeWaiter: CheckedContinuation<Void, Never>?
+
+    @MainActor
+    private func resumeCloseWaiter(timedOut: Bool) {
+        guard let waiter = closeWaiter else { return }
+        closeWaiter = nil
+        if timedOut { emit(.log("session close timed out — continuing teardown")) }
+        waiter.resume()
     }
 
     /// Whether a camera has been seen on the cable. Lets a caller probe for a
@@ -289,6 +328,9 @@ extension ICCTransport: ICCameraDeviceDelegate {
     public func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {
         isReady = false
         emit(.log("session closed \(error.map { "with error: \($0)" } ?? "cleanly")"))
+        // Releases disconnect()'s wait. Without this the teardown either
+        // blocks for its full timeout every time, or races a new browser.
+        Task { @MainActor [weak self] in self?.resumeCloseWaiter(timedOut: false) }
     }
 
     public func didRemove(_ device: ICDevice) {
