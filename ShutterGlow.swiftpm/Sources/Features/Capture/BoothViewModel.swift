@@ -93,6 +93,17 @@ public final class BoothViewModel: ObservableObject {
     @Published public private(set) var wifiFallbackVisible = false
     private var usbCameraSeen = false
 
+    /// True while looking for a body on the cable. The connect screen shows a
+    /// searching state for this, rather than opening on an IP field the
+    /// operator probably does not need — most of the time a cable is plugged
+    /// in and no address is ever required.
+    @Published public private(set) var isProbingUSB = false
+
+    /// Set when a connected body cannot do everything the booth expects, e.g.
+    /// no live view over USB. Shown on the connect screen, because finding out
+    /// mid-event is worse.
+    @Published public private(set) var cameraCapabilityNote: String?
+
     /// Whether to show the camera IP field at all.
     ///
     /// Sony is Wi-Fi only, so it always needs one. USB Webcam is a cable and
@@ -360,14 +371,17 @@ public final class BoothViewModel: ObservableObject {
     private func bringUpCanon(host: String) async {
         usbCameraSeen = false
         wifiFallbackVisible = false
-        connectionMessage = "Looking for a camera on USB…"
+        cameraCapabilityNote = nil
+        isProbingUSB = true
+        defer { isProbingUSB = false }
+        connectionMessage = "Looking for a camera…"
 
         let usb = ICCTransport()
         transport = usb
-        camera = EOSCamera(transport: usb)
         // Wired before start() so the browser cannot report a device into a
         // stream nobody is reading yet. handle() takes it from .ready onwards,
-        // so a USB camera brings itself all the way up with no further work.
+        // so a camera on the cable brings itself all the way up with no
+        // further work.
         eventConsumer = Task { [weak self] in
             for await event in usb.events {
                 await self?.handle(event)
@@ -380,6 +394,8 @@ public final class BoothViewModel: ObservableObject {
         // waiting that long before offering the Wi-Fi box would feel broken.
         // deviceFound is the honest "something is on the cable" signal.
         for _ in 0..<12 {
+            // handle(.deviceFound) has already picked the protocol actor by the
+            // time this sees the flag.
             if usbCameraSeen { return }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
@@ -419,6 +435,16 @@ public final class BoothViewModel: ObservableObject {
         switch event {
         case .deviceFound(let name):
             usbCameraSeen = true
+            // Build the protocol actor HERE, not back in the probe loop.
+            // `.ready` can follow `.deviceFound` faster than that loop's 250ms
+            // tick on a near-empty card, and startRemoteModeAndLiveView needs
+            // `camera` already set when it does.
+            if let usb = transport as? ICCTransport, camera == nil {
+                let match = TetheredCameraFactory.make(deviceName: usb.deviceName, transport: usb)
+                camera = match.camera
+                cameraCapabilityNote = match.capability.operatorNote
+                DiagnosticLog.shared.log(.camera, "USB camera: \(match.describedAs) (\(match.capability))")
+            }
             connectionMessage = "Found \(name) — starting session…"
         case .ready:
             connectionMessage = "Camera ready — starting live view…"

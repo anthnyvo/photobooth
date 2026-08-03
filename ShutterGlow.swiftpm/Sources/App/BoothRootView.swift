@@ -169,6 +169,12 @@ private struct ConnectView: View {
                     .animation(.easeOut(duration: 0.3), value: model.connectionMessage)
                     .entrance(entered, delay: 0.06)
 
+                // Hidden while a camera is being looked for on the cable.
+                // Landing straight on a brand picker and an IP box implies the
+                // operator has a decision to make, when most of the time the
+                // right answer is "a camera is already plugged in" and no
+                // input is needed at all. These appear only if that fails.
+                if !model.isProbingUSB {
                 // Camera brand picker. Only three brands ship, all short
                 // labels, so they sit centered in one row rather than a
                 // left-aligned scroller.
@@ -240,6 +246,15 @@ private struct ConnectView: View {
                 }
                 .padding(20)
                 .chassisPanel()
+                }
+
+                if let note = model.cameraCapabilityNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Chassis.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
 
                 if let error = model.lastError {
                     Text(error)

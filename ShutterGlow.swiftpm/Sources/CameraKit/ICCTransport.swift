@@ -131,6 +131,11 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     /// consume the event stream (which has a single consumer) to find out.
     public var hasDevice: Bool { camera != nil }
 
+    /// Name ImageCaptureCore reports for the attached body, e.g. "Canon EOS R".
+    /// Used to pick which protocol actor to drive it with — see
+    /// `TetheredCameraFactory`.
+    public private(set) var deviceName: String?
+
     // MARK: - PTP passthrough
 
     /// Send one PTP transaction and wait for the reply blob.
@@ -233,6 +238,7 @@ extension ICCTransport: ICDeviceBrowserDelegate {
         guard let cam = device as? ICCameraDevice else { return }
         camera = cam
         cam.delegate = self
+        deviceName = device.name
         emit(.deviceFound(name: device.name ?? "unknown camera"))
         cam.requestOpenSession()
     }

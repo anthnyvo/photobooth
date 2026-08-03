@@ -42,7 +42,7 @@ public enum CameraBrand: String, CaseIterable, Sendable, Identifiable {
     public var connectionHint: String {
         switch self {
         case .canonEOS:
-            "Camera in Remote control (EOS Utility) Wi-Fi mode."
+            "Plug the camera in with a USB-C cable and it connects on its own — no network, no IP, nothing to set. Any camera speaking PTP works over the cable, though only Canon EOS is hardware-proven; other bodies may capture without a live preview. If no cable is found this falls back to Wi-Fi, which is Canon-only and needs the camera in Remote control (EOS Utility) mode."
         case .sony:
             "Camera in Control with Smartphone / Smart Remote mode, iPad joined to the camera's Wi-Fi. Uses Sony's legacy Camera Remote API, which only older α and RX bodies support. Not yet verified on hardware. If you have a recent Sony such as the a7 IV, use USB Webcam instead: that path is tested and runs over a single cable."
         case .usbWebcam:
