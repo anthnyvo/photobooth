@@ -250,6 +250,24 @@ private struct ConnectView: View {
                 .chassisPanel()
                 }
 
+                // Explicit retry. The Connect button below re-probes USB too,
+                // but it reads as "connect using the address in this box",
+                // so an attendant who has just plugged the cable in after the
+                // search failed has no obvious way to ask again.
+                if model.wifiFallbackVisible {
+                    Button(action: model.retryCameraSearch) {
+                        Label("Search for camera again", systemImage: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Chassis.textPrimary)
+                            .padding(.vertical, 13)
+                            .padding(.horizontal, 22)
+                            .background(Capsule().fill(.ultraThinMaterial))
+                            .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                    }
+                    .buttonStyle(PressableStyle())
+                    .padding(.top, 4)
+                }
+
                 if let note = model.cameraCapabilityNote {
                     Text(note)
                         .font(.caption)
@@ -266,6 +284,9 @@ private struct ConnectView: View {
                         .padding(.horizontal, 40)
                 }
 
+                // Still reachable here, but no longer the only route: editing
+                // now lives on the event list, next to the events themselves,
+                // rather than behind a camera-connect step.
                 GhostButton(title: "Event Setup") { showAdmin = true }
                     .padding(.top, 20)
                     .entrance(entered, delay: 0.18)

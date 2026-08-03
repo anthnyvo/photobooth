@@ -363,6 +363,9 @@ struct AdminView: View {
                             .padding(.top, 4)
                             .transition(.opacity)
                     }
+
+                    saveButton
+                        .padding(.top, 8)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -466,20 +469,28 @@ struct AdminView: View {
                 .foregroundStyle(Chassis.textPrimary)
 
             Spacer()
-
-            Button(action: save) {
-                Text("Save")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.black)
-                    .padding(.vertical, 11)
-                    .padding(.horizontal, 24)
-                    .background(Capsule().fill(Color.white))
-            }
-            .buttonStyle(.plain)
-            .disabled(eventId.isEmpty || displayName.isEmpty)
-            .opacity(eventId.isEmpty || displayName.isEmpty ? 0.4 : 1)
         }
         .padding(.top, 8)
+    }
+
+    /// Save lives at the BOTTOM of the form, not in the header.
+    ///
+    /// This screen is a long scroll, and a header button means filling
+    /// everything in, then scrolling all the way back up to commit it. Full
+    /// width and last in the flow is where a thumb already is when the form
+    /// is finished.
+    private var saveButton: some View {
+        Button(action: save) {
+            Text("Save")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.black)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 17)
+                .background(Capsule().fill(Color.white))
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(eventId.isEmpty || displayName.isEmpty)
+        .opacity(eventId.isEmpty || displayName.isEmpty ? 0.4 : 1)
     }
 
     /// Live attendant status + running totals for the *active* event — kept

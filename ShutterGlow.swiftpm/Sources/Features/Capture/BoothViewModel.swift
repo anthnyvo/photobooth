@@ -228,6 +228,20 @@ public final class BoothViewModel: ObservableObject {
         step = .connecting
     }
 
+    /// Make an event active WITHOUT leaving the picker.
+    ///
+    /// Editing is reached from the event list now rather than from the camera
+    /// connect screen, and AdminView edits whichever event is active — so the
+    /// row has to become active before the sheet opens, without the
+    /// step change that `selectEvent` does.
+    @discardableResult
+    public func loadEventForEditing(_ eventId: String) -> Bool {
+        guard let selected = try? EventStorage.shared.load(eventId) else { return false }
+        EventStorage.shared.setCurrentEventId(eventId)
+        config = selected
+        return true
+    }
+
     /// Attendant backs out of camera-connect to switch events — tears down
     /// any in-flight connect attempt so a stray transport doesn't linger.
     public func backToEventPicker() {
@@ -288,6 +302,19 @@ public final class BoothViewModel: ObservableObject {
         // than trusting a picker the operator may never have touched, and a
         // body plugged in over USB should just work whoever made it.
         autoConnectAttempted = true
+        connectCamera()
+    }
+
+    /// Run the cable search again after it came back empty.
+    ///
+    /// The usual reason it failed is that the camera was not plugged in, or
+    /// was asleep, when the screen opened — both fixed in five seconds at the
+    /// booth. Without this the only route back is out to the event picker and
+    /// in again, which is not a thing an attendant would guess at.
+    public func retryCameraSearch() {
+        wifiFallbackVisible = false
+        cameraCapabilityNote = nil
+        lastError = nil
         connectCamera()
     }
 
