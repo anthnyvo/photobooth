@@ -824,7 +824,12 @@ public final class BoothViewModel: ObservableObject {
             lastError = "Capture failed: connection timed out"
             DiagnosticLog.shared.log(.capture, "capture timed out")
             step = .attract
-            await transport?.disconnect()
+            // Deliberately NOT disconnecting the transport here. Doing so
+            // closed the session first, and connectCamera's own teardown then
+            // tried to restore capture destination, EVF and remote mode down a
+            // transport that was already dead — so the restores silently
+            // failed and the body could be left in PC mode. connectCamera
+            // tears both down in the right order.
             step = .connecting
             connectionMessage = "Connection lost — reconnecting…"
             try? await Task.sleep(nanoseconds: 1_000_000_000)

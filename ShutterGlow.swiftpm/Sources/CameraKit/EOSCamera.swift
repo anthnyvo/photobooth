@@ -406,11 +406,12 @@ public actor EOSCamera {
         // the opcode the ladder below should still get its chance.
         let lock = try? await transport.send(code: CanonOp.setUILock)
         log("SetUILock: \(code(of: lock))")
-        defer {
-            let transport = self.transport
-            Task { _ = try? await transport.send(code: CanonOp.resetUILock) }
-        }
 
+        // Released on BOTH paths, awaited. Swift cannot await inside defer, and
+        // a UI lock handed back from a detached Task can still be held when the
+        // next capture starts or when disconnect runs — leaving the body under
+        // host control with nothing driving it, which is the same family of
+        // stuck state as the PC-mode icon.
         var attempts: [String] = []
 
         for method in ShutterMethod.allCases {
@@ -419,12 +420,14 @@ public actor EOSCamera {
             if outcome.fired {
                 log("SHUTTER FIRED via \(method.label)")
                 log("  ladder: \(attempts.joined(separator: " | "))")
+                _ = try? await transport.send(code: CanonOp.resetUILock)
                 return
             }
         }
 
         log("no release method produced an object event")
         log("  ladder: \(attempts.joined(separator: " | "))")
+        _ = try? await transport.send(code: CanonOp.resetUILock)
         throw EOSError.badResponse(operation: "triggerShutter (all methods)", code: nil)
     }
 
@@ -496,25 +499,26 @@ public actor EOSCamera {
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
 
         case .evfOffThenFull:
-            // Restored in a defer: leaving the body with EVF off after a
-            // failed attempt would kill live view for the rest of the
-            // session, which is the one thing currently working.
+            // EVF is restored on every exit path below, awaited rather than
+            // deferred into a detached Task. Leaving the body with EVF off
+            // kills live view for the rest of the session — the one thing
+            // currently working — and a detached restore lands at an
+            // unpredictable point, possibly after live view has already tried
+            // to resume against a dark sensor.
             try? await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off (release attempt)")
-            defer {
-                Task { [weak self] in
-                    try? await self?.setProperty(CanonProp.evfOutputDevice, 3,
-                                                 name: "EVFOutputDevice=cameraAndHost (restored)")
-                }
-            }
             try? await Task.sleep(nanoseconds: 400_000_000)
             for afParam: UInt32 in [1, 0] {
                 let r = try? await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, afParam])
                 note += "af\(afParam)=\(code(of: r)) "
                 _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2])
                 if await objectEventArrived() {
+                    try? await setProperty(CanonProp.evfOutputDevice, 3,
+                                           name: "EVFOutputDevice=cameraAndHost (restored)")
                     return ReleaseOutcome(fired: true, summary: note + "-> object event")
                 }
             }
+            try? await setProperty(CanonProp.evfOutputDevice, 3,
+                                   name: "EVFOutputDevice=cameraAndHost (restored)")
         }
 
         let fired = await objectEventArrived()

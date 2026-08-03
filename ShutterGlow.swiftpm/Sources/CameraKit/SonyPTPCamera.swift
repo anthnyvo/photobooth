@@ -95,18 +95,27 @@ public actor SonyPTPCamera: TetheredCamera {
         // Give AF a beat to confirm. On a manual lens this simply passes.
         try? await Task.sleep(nanoseconds: 300_000_000)
         try await setControl(SonyProp.capture, 2)
-
-        // Release in reverse order, always, even if the download below fails.
-        defer {
-            let transport = self.transport
-            Task {
-                _ = try? await Self.sendControl(transport, SonyProp.capture, 1)
-                _ = try? await Self.sendControl(transport, SonyProp.autofocus, 1)
-            }
-        }
-
         log("shutter pressed")
-        return try await transport.nextCapturedFileViaObjectAdded(timeout: 20)
+
+        // Release is AWAITED on both paths rather than deferred into a
+        // detached Task. Swift cannot await inside defer, and firing the
+        // release off unordered is the Sony version of Canon's stuck
+        // half-press: the body is left holding a virtual button down, and the
+        // next capture finds it busy. Explicit do/catch is the price of
+        // getting that right.
+        do {
+            let data = try await transport.nextCapturedFileViaObjectAdded(timeout: 20)
+            await releaseShutterButtons()
+            return data
+        } catch {
+            await releaseShutterButtons()
+            throw error
+        }
+    }
+
+    private func releaseShutterButtons() async {
+        _ = try? await Self.sendControl(transport, SonyProp.capture, 1)
+        _ = try? await Self.sendControl(transport, SonyProp.autofocus, 1)
     }
 
     private func setControl(_ property: UInt32, _ value: UInt16) async throws {

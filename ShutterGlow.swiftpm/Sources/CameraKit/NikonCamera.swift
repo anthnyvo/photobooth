@@ -104,12 +104,14 @@ public actor NikonCamera: TetheredCamera {
         return try await transport.nextCapturedFileViaObjectAdded(timeout: 15)
     }
 
-    public func disconnect() {
+    public func disconnect() async {
         liveViewTask?.cancel()
         liveViewContinuation?.finish()
         liveViewContinuation = nil
-        Task { [transport] in
-            _ = try? await transport.send(code: NikonOp.endLiveView)
-        }
+        // Awaited, not fired into a detached Task. EndLiveView landing after
+        // the transport has already closed means the body is left streaming
+        // to nobody, which on reconnect looks like a camera that will not
+        // come back — the same failure the Canon path hit on 2026-08-03.
+        _ = try? await transport.send(code: NikonOp.endLiveView)
     }
 }

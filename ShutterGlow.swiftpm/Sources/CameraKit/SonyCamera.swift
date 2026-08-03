@@ -152,13 +152,16 @@ public actor SonyCamera: TetheredCamera {
         return nil
     }
 
-    public func disconnect() {
+    public func disconnect() async {
         liveViewTask?.cancel()
         chunkedReader?.cancel()
         chunkedReader = nil
         liveViewContinuation?.finish()
         liveViewContinuation = nil
-        Task { _ = try? await call("stopRecMode") }
+        // Awaited: a camera left in RecMode keeps its own session open, and
+        // the next connect can be refused because the previous one was never
+        // closed. Same class of bug as the Canon PC-mode lockup.
+        _ = try? await call("stopRecMode")
     }
 
     // MARK: - JSON-RPC plumbing
