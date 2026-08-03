@@ -20,6 +20,10 @@ public protocol PTPTransport: Sendable {
     /// (USB/Canon-only — no dedicated event channel to wait on).
     func nextCapturedFileViaObjectAdded(timeout: TimeInterval) async throws -> Data
     var events: AsyncStream<TransportEvent> { get }
+    /// Tear the connection down. Declared here so callers can hold
+    /// `any PTPTransport` and still clean up — BoothViewModel picks USB or
+    /// Wi-Fi at runtime and must be able to drop either.
+    func disconnect() async
 }
 
 // Default-carrying convenience overload — protocol requirements can't declare

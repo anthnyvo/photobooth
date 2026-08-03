@@ -120,6 +120,17 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         browser.stop()
     }
 
+    /// PTPTransport conformance. Same teardown as `stop()`, under the name
+    /// callers holding `any PTPTransport` can reach.
+    public func disconnect() {
+        stop()
+    }
+
+    /// Whether a camera has been seen on the cable. Lets a caller probe for a
+    /// USB body and fall back to Wi-Fi when there isn't one, without having to
+    /// consume the event stream (which has a single consumer) to find out.
+    public var hasDevice: Bool { camera != nil }
+
     // MARK: - PTP passthrough
 
     /// Send one PTP transaction and wait for the reply blob.

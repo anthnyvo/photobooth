@@ -205,13 +205,15 @@ private struct ConnectView: View {
                 .entrance(entered, delay: 0.1)
 
                 VStack(spacing: 14) {
-                    // Wired UVC webcam mode has no IP to enter — it's a
-                    // cable, not a network connection.
-                    if model.selectedBrand != .usbWebcam {
+                    // Only shown for a transport that actually needs an
+                    // address — see BoothViewModel.showsIPField. Canon now
+                    // tries USB first and only reveals this if no camera is
+                    // found on the cable.
+                    if model.showsIPField {
                         ChassisLabel(text: "Camera IP", size: 10)
                     }
                     HStack(spacing: 12) {
-                        if model.selectedBrand != .usbWebcam {
+                        if model.showsIPField {
                             TextField("192.168.1.2", text: $model.cameraIPText)
                                 .font(.system(.body, design: .monospaced))
                                 .foregroundStyle(Chassis.textPrimary)

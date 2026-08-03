@@ -80,7 +80,30 @@ public final class BoothViewModel: ObservableObject {
         didSet { selectedBrand.save() }
     }
 
-    private var transport: PTPIPTransport?
+    /// USB (ICCTransport) or Wi-Fi (PTPIPTransport), chosen at connect time by
+    /// whether a camera is actually on the cable — see bringUpCanon.
+    private var transport: (any PTPTransport)?
+
+    /// True once ICDeviceBrowser has seen a camera on USB during a connect
+    /// attempt. Drives the USB-or-Wi-Fi decision, and the IP field's
+    /// visibility: an operator on a cable should never be shown an IP box.
+    @Published public private(set) var wifiFallbackVisible = false
+    private var usbCameraSeen = false
+
+    /// Whether to show the camera IP field at all.
+    ///
+    /// Sony is Wi-Fi only, so it always needs one. USB Webcam is a cable and
+    /// never does. Canon hides it until a USB probe has actually failed — the
+    /// common case is now "plug the cable in and tap Connect", and putting a
+    /// network field in front of that invites an operator to fill it in when
+    /// nothing needs it.
+    public var showsIPField: Bool {
+        switch selectedBrand {
+        case .usbWebcam: false
+        case .sony: true
+        case .canonEOS: wifiFallbackVisible
+        }
+    }
     private var camera: (any TetheredCamera)?
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
@@ -296,10 +319,58 @@ public final class BoothViewModel: ObservableObject {
             return
         }
 
+        Task { [weak self] in await self?.bringUpCanon(host: host) }
+    }
+
+    /// Canon over USB when a camera is on the cable, Wi-Fi when there isn't.
+    ///
+    /// USB is preferred and the operator is never asked to choose. It needs no
+    /// AP, no pairing and no IP address, and it measured faster than Wi-Fi on
+    /// both live view (30-36 fps vs 14) and capture (1.94s vs 2.79s) — see
+    /// docs/PHASE0.md. Making that a setting would just be a way to get it
+    /// wrong at a venue.
+    private func bringUpCanon(host: String) async {
+        usbCameraSeen = false
+        wifiFallbackVisible = false
+        connectionMessage = "Looking for a camera on USB…"
+
+        let usb = ICCTransport()
+        transport = usb
+        camera = EOSCamera(transport: usb)
+        // Wired before start() so the browser cannot report a device into a
+        // stream nobody is reading yet. handle() takes it from .ready onwards,
+        // so a USB camera brings itself all the way up with no further work.
+        eventConsumer = Task { [weak self] in
+            for await event in usb.events {
+                await self?.handle(event)
+            }
+        }
+        usb.start()
+
+        // Probe on .deviceFound, not .ready: ImageCaptureCore indexes the
+        // card's whole catalog before firing ready (~9s on a full card), and
+        // waiting that long before offering the Wi-Fi box would feel broken.
+        // deviceFound is the honest "something is on the cable" signal.
+        for _ in 0..<12 {
+            if usbCameraSeen { return }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+
+        // Nothing on the cable. Drop the browser before opening a PTP/IP
+        // session — leaving it scanning would have two transports live at once
+        // and a stale ICCTransport still holding its delegate callbacks.
+        eventConsumer?.cancel()
+        eventConsumer = nil
+        usb.stop()
+        camera = nil
+        transport = nil
+
+        wifiFallbackVisible = true
+        connectionMessage = "No camera on USB — connecting to \(host)…"
+
         let wifiTransport = PTPIPTransport(host: host)
         transport = wifiTransport
-        let cam = EOSCamera(transport: wifiTransport)
-        camera = cam
+        camera = EOSCamera(transport: wifiTransport)
 
         eventConsumer = Task { [weak self] in
             for await event in wifiTransport.events {
@@ -307,20 +378,19 @@ public final class BoothViewModel: ObservableObject {
             }
         }
 
-        Task {
-            do {
-                try await wifiTransport.connect()
-            } catch {
-                self.lastError = "Connect failed: \(error)"
-                DiagnosticLog.shared.log(.camera, "connect failed: \(error)")
-                self.connectionMessage = "Connect failed — check the camera is in Remote control (EOS Utility) mode and the IP is correct"
-            }
+        do {
+            try await wifiTransport.connect()
+        } catch {
+            lastError = "Connect failed: \(error)"
+            DiagnosticLog.shared.log(.camera, "connect failed: \(error)")
+            connectionMessage = "No camera found on USB, and the Wi-Fi connection failed. Either plug the camera in with a USB-C cable, or check it is in Remote control (EOS Utility) mode and the IP is right."
         }
     }
 
     private func handle(_ event: TransportEvent) async {
         switch event {
         case .deviceFound(let name):
+            usbCameraSeen = true
             connectionMessage = "Found \(name) — starting session…"
         case .ready:
             connectionMessage = "Camera ready — starting live view…"
