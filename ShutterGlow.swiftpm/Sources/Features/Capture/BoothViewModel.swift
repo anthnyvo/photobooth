@@ -242,13 +242,43 @@ public final class BoothViewModel: ObservableObject {
         return true
     }
 
-    /// Attendant backs out of camera-connect to switch events — tears down
-    /// any in-flight connect attempt so a stray transport doesn't linger.
+    /// Attendant backs out of camera-connect to switch events.
+    ///
+    /// **A wired camera session is KEPT, not torn down.**
+    ///
+    /// Hardware 2026-08-03 settled this: a full, clean teardown - every PTP
+    /// restore returning 0x2001, the ICC session closed, every reference
+    /// dropped, and ICCTransport actually deallocating - still leaves the EOS R
+    /// showing its PC-connection icon and refusing to re-enumerate. Only
+    /// force-quitting the app clears it. iOS holds the USB device at the
+    /// process level regardless of what we release, so there is no teardown
+    /// sequence that fixes it.
+    ///
+    /// So stop tearing down. The camera is physically attached and is about to
+    /// be reconnected; disconnecting because someone stepped back to change
+    /// events is inherited from the Wi-Fi design, where holding a socket open
+    /// was the wasteful option. Over a cable it costs a working session and
+    /// buys nothing. Reconnecting is now instant, with no re-enumeration at
+    /// all.
+    ///
+    /// Wi-Fi still tears down: a PTP/IP socket left open really does go stale,
+    /// and the camera is not physically present to keep it honest.
     public func backToEventPicker() {
-        eventConsumer?.cancel()
-        eventConsumer = nil
         liveViewConsumer?.cancel()
         liveViewConsumer = nil
+
+        if let usb = transport as? ICCTransport, usb.hasDevice {
+            DiagnosticLog.shared.log(.camera, "keeping USB session alive across event switch")
+            liveViewImage = nil
+            cameraBatteryLevel = nil
+            lastError = nil
+            connectionMessage = "Camera connected"
+            step = .eventPicker
+            return
+        }
+
+        eventConsumer?.cancel()
+        eventConsumer = nil
         // Disconnect the camera itself, not just the transport. Nilling the
         // camera without disconnecting leaked a live AVCaptureSession on the
         // USB path — it kept running and holding the one external camera, so
@@ -329,6 +359,25 @@ public final class BoothViewModel: ObservableObject {
 
     public func connectCamera() {
         guard !connectInFlight else { return }
+
+        // A wired session kept alive across an event switch is reused as-is.
+        // Re-probing would mean tearing this one down first, and a torn-down
+        // USB session cannot be re-established without force-quitting the app
+        // (see backToEventPicker). So the fast path is also the only path that
+        // works.
+        if let usb = transport as? ICCTransport, usb.hasDevice, let existing = camera {
+            DiagnosticLog.shared.log(.camera, "reusing live USB session")
+            connectionMessage = "Camera ready — starting live view…"
+            wifiFallbackVisible = false
+            isProbingUSB = false
+            connectInFlight = true
+            Task { [weak self] in
+                await self?.resumeLiveView(on: existing)
+                self?.connectInFlight = false
+            }
+            return
+        }
+
         connectInFlight = true
         lastError = nil
         connectionMessage = "Connecting to \(cameraIPText)…"
@@ -563,6 +612,53 @@ public final class BoothViewModel: ObservableObject {
         }
     }
 
+    /// Restart just the frame stream on a session that is already in remote
+    /// mode, for a wired camera kept alive across an event switch.
+    ///
+    /// Deliberately does NOT re-run enterRemoteMode: the body is already there,
+    /// and re-entering would re-send SetRemoteMode and the capture-destination
+    /// property for no reason on a session that never dropped.
+    private func resumeLiveView(on camera: any TetheredCamera) async {
+        do {
+            let frames = try await camera.startLiveView()
+            consumeLiveView(frames)
+            step = .attract
+        } catch {
+            lastError = "Live view failed: \(error)"
+            DiagnosticLog.shared.log(.camera, "live view resume failed: \(error)")
+            connectionMessage = "Camera connected, but live view did not start"
+        }
+    }
+
+    /// Drain a live-view stream into the feed. Shared by first connect and by
+    /// resuming a kept-alive wired session, so the two cannot drift.
+    ///
+    /// Detached on purpose: a plain Task{} here inherits the main actor, which
+    /// put every frame's JPEG decode on the main thread — and UIImage defers
+    /// the actual bitmap decompress to first render, landing that on the main
+    /// thread too. Decoding AND rasterizing (preparingForDisplay) off-main
+    /// turns each frame's main-thread cost into a pointer swap + composited
+    /// blit, which is both the smoothness fix and an effective frame-rate
+    /// raise: the stream buffers only the newest frame, so a slow consumer was
+    /// silently dropping frames the camera had already delivered.
+    private func consumeLiveView(_ frames: AsyncStream<Data>) {
+        liveViewConsumer?.cancel()
+        liveViewConsumer = Task.detached(priority: .userInitiated) { [weak self] in
+            for await jpeg in frames {
+                guard let self else { return }
+                guard let raw = UIImage(data: jpeg) else { continue }
+                let image = raw.preparingForDisplay() ?? raw
+                await MainActor.run {
+                    self.liveFeed.image = image
+                    self.latestLiveFrameJPEG = jpeg
+                    if self.isRecordingFrames {
+                        self.recordedFrames.append(jpeg)
+                    }
+                }
+            }
+        }
+    }
+
     private func startRemoteModeAndLiveView() async {
         guard let camera else { return }
         do {
@@ -571,30 +667,7 @@ public final class BoothViewModel: ObservableObject {
                 Task { @MainActor in self?.cameraBatteryLevel = level }
             }
             let frames = try await camera.startLiveView()
-            liveViewConsumer?.cancel()
-            // Detached on purpose: a plain Task{} here inherits the main
-            // actor, which put every frame's JPEG decode on the main thread
-            // — and UIImage defers the actual bitmap decompress to first
-            // render, landing that on the main thread too. Decoding AND
-            // rasterizing (preparingForDisplay) off-main turns each frame's
-            // main-thread cost into a pointer swap + composited blit, which
-            // is both the smoothness fix and an effective frame-rate raise:
-            // the stream buffers only the newest frame, so a slow consumer
-            // was silently dropping frames the camera had already delivered.
-            liveViewConsumer = Task.detached(priority: .userInitiated) { [weak self] in
-                for await jpeg in frames {
-                    guard let self else { return }
-                    guard let raw = UIImage(data: jpeg) else { continue }
-                    let image = raw.preparingForDisplay() ?? raw
-                    await MainActor.run {
-                        self.liveFeed.image = image
-                        self.latestLiveFrameJPEG = jpeg
-                        if self.isRecordingFrames {
-                            self.recordedFrames.append(jpeg)
-                        }
-                    }
-                }
-            }
+            consumeLiveView(frames)
             step = .attract
         } catch {
             lastError = "Remote mode / live view failed: \(error)"
