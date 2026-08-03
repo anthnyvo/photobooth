@@ -255,6 +255,10 @@ private struct ConnectView: View {
             }
         }
         .onAppear { entered = true }
+        // Reach for the cable before the operator reaches for the screen. If
+        // no camera is attached this falls through to the Wi-Fi path and
+        // reveals the IP field, same as tapping Connect would.
+        .task { model.autoConnectIfPossible() }
         .sheet(isPresented: $showAdmin) {
             PINGate {
                 AdminView(model: model)

@@ -38,7 +38,10 @@ public final class BoothViewModel: ObservableObject {
         set { liveFeed.image = newValue }
     }
     @Published public var cameraIPText: String = "192.168.1.2"
-    @Published public private(set) var connectionMessage: String = "Enter the camera's IP and connect"
+    /// Deliberately not "enter the camera's IP" any more: Canon connects over
+    /// the cable on its own now, and an IP is only ever asked for after that
+    /// has failed, or for Sony.
+    @Published public private(set) var connectionMessage: String = "Connect the camera"
     @Published public private(set) var lastError: String?
     /// Non-nil only mid-strip-sequence, so CaptureView can show "Shot 2 of 3"
     /// — nil (and ignored) for a normal single-shot capture.
@@ -240,7 +243,11 @@ public final class BoothViewModel: ObservableObject {
         liveViewImage = nil
         cameraBatteryLevel = nil
         lastError = nil
-        connectionMessage = "Enter the camera's IP and connect"
+        // Re-arm the automatic USB attempt: backing out and coming in again is
+        // exactly what an operator does after plugging the cable in.
+        autoConnectAttempted = false
+        wifiFallbackVisible = false
+        connectionMessage = "Connect the camera"
         step = .eventPicker
     }
 
@@ -252,6 +259,27 @@ public final class BoothViewModel: ObservableObject {
     /// camera — the same "came up black" failure, just triggered by an
     /// impatient double-tap instead of a stale session.
     private var connectInFlight = false
+
+    /// Has an automatic USB attempt already run for this visit to the connect
+    /// screen. Reset by backToEventPicker so a later visit tries again, but
+    /// not on every SwiftUI re-render of the same screen.
+    private var autoConnectAttempted = false
+
+    /// Try the camera on the cable the moment the connect screen appears, so
+    /// the normal setup is "plug it in" with nothing to tap.
+    ///
+    /// Only for Canon. Sony is Wi-Fi-only and needs an address typed first,
+    /// and USB Webcam has its own explicit brand selection — auto-grabbing a
+    /// UVC device there would fight with that choice.
+    ///
+    /// If nothing is on the cable this falls through to the Wi-Fi path exactly
+    /// as a manual tap would, revealing the IP field.
+    public func autoConnectIfPossible() {
+        guard !autoConnectAttempted, !connectInFlight, camera == nil else { return }
+        guard selectedBrand == .canonEOS else { return }
+        autoConnectAttempted = true
+        connectCamera()
+    }
 
     public func connectCamera() {
         guard !connectInFlight else { return }
