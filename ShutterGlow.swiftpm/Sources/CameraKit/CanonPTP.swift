@@ -64,6 +64,15 @@ public enum CanonProp {
     /// third-party tethering — the camera also tries to write the card mid-
     /// capture, and any card hiccup surfaces as a body-halting error.
     public static let captureDestinationHost: UInt32 = 4
+    /// Write to the memory card — the body's own default, and what this app
+    /// uses. Host destination needs an object-transfer handshake we do not
+    /// implement, and the EOS R refuses to release the shutter without it.
+    ///
+    /// Restoring this on disconnect matters more than it looks: the property
+    /// persists on the camera after the USB session ends, so a body left on
+    /// Host silently writes photos nowhere — physical shutter included, at a
+    /// real event, with no warning on the camera itself.
+    public static let captureDestinationCard: UInt32 = 2
     /// 3 = manual focus. libgphoto2 checks this before deciding whether to
     /// wait for AF confirmation at all — worth knowing which mode the body
     /// is actually in during capture debugging, not just what a switch

@@ -72,22 +72,27 @@ public actor EOSCamera {
             try await expectOK("SetEventMode",
                 await transport.send(code: CanonOp.setEventMode, parameters: [1]))
             startEventLoop()
-            // Restored 2026-08-01. This was disabled while hunting a bug
-            // where AF was blocked camera-wide — remote AND physical shutter,
-            // for the whole remote session — which no AF setting explained,
-            // and CaptureDestination was the last remaining variable.
+            // Capture to the CARD, not the host.
             //
-            // It was never the variable. The real cause was the transport
-            // discarding every data phase (see PTPTransactionResult.from):
-            // GetEvent returned 0x2001 with an empty payload on every poll,
-            // so startEventLoop() below believed it was draining the queue
-            // and drained nothing. A Canon body whose event queue is never
-            // drained wedges, which is exactly what a dead physical shutter
-            // looks like. With the data phase read, events flow and the
-            // premise for disabling this is gone.
+            // Host destination (4) is why the shutter would not fire. Hardware
+            // 2026-08-03: with Host set, every release path returned DeviceBusy
+            // — bare release, full-press alone, half+full, and with EVF torn
+            // down. With Card set, the same commands were accepted. Cascable
+            // Studio confirmed the split from the other side: it captures on
+            // this exact body and cable, and treats "PC Only / Host Only" as a
+            // separate paid mode, because host destination needs a real
+            // object-transfer handshake (RequestObjectTransfer -> GetPartialObject
+            // -> TransferComplete) that this app has never implemented. Asking
+            // the body to hand an image to a host that will not collect it is
+            // what it was refusing to do.
+            //
+            // This setting also PERSISTS on the camera after disconnect. Left
+            // on Host, the body writes photos nowhere at all — including for
+            // the physical shutter, at a real event, silently. resetDeviceState()
+            // below puts it back; see disconnect().
             try await setProperty(CanonProp.captureDestination,
-                                  CanonProp.captureDestinationHost,
-                                  name: "CaptureDestination=Host")
+                                  CanonProp.captureDestinationCard,
+                                  name: "CaptureDestination=Card")
             state = .connected
             log("remote mode active")
         } catch {
@@ -524,6 +529,32 @@ public actor EOSCamera {
     // MARK: - Teardown / recovery
 
     public func disconnect() {
+        // Hand the camera back before dropping the session. Canon properties
+        // set over PTP PERSIST after the USB connection ends — an operator who
+        // unplugs mid-session and then shoots the rest of the night on the
+        // physical shutter would otherwise be running a body we quietly
+        // reconfigured, with live view redirected and (before 2026-08-03)
+        // capture destined for a host that is no longer there.
+        //
+        // Best effort and fire-and-forget: disconnect is also called when the
+        // cable has already been pulled, where these sends simply fail. The
+        // point is the ordinary teardown path, not the yanked-cable one.
+        let transport = self.transport
+        Task {
+            _ = try? await transport.send(code: CanonOp.resetUILock)
+            var card = Data()
+            card.appendLE(UInt32(12))
+            card.appendLE(CanonProp.captureDestination)
+            card.appendLE(CanonProp.captureDestinationCard)
+            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
+            var evf = Data()
+            evf.appendLE(UInt32(12))
+            evf.appendLE(CanonProp.evfOutputDevice)
+            evf.appendLE(UInt32(0))
+            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
+            _ = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
+        }
+
         eventLoopTask?.cancel()
         liveViewTask?.cancel()
         state = .idle
