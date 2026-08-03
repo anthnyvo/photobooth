@@ -371,12 +371,26 @@ public actor EOSCamera {
         case fullPressOnly
         /// Half press then full press — libgphoto2's reference sequence.
         case halfThenFull
+        /// Live view fully torn down (EVFOutputDevice=0) for the duration of
+        /// the release, then restored.
+        ///
+        /// A comment in this file said this was tried and made no difference.
+        /// That test ran while the transport was discarding every data phase,
+        /// so nothing worked and it proved nothing — as does every other
+        /// "tried X, no difference" note written before 2026-08-01. Retrying
+        /// it because the one consistent correlation across all hardware runs
+        /// is CaptureDestination: Card releases fine, Host always returns
+        /// DeviceBusy. With EVFOutputDevice=cameraAndHost the body is being
+        /// asked to stream live view to the host and buffer a full-res image
+        /// for the host at the same time, which it may simply refuse.
+        case evfOffThenFull
 
         var label: String {
             switch self {
             case .bareRelease: "bare RemoteRelease 0x910F"
             case .fullPressOnly: "full press only (no AF half-press)"
             case .halfThenFull: "half+full pair"
+            case .evfOffThenFull: "EVF off, then full press"
             }
         }
     }
@@ -413,6 +427,27 @@ public actor EOSCamera {
             note += "full=\(code(of: full)) "
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2])
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
+
+        case .evfOffThenFull:
+            // Restored in a defer: leaving the body with EVF off after a
+            // failed attempt would kill live view for the rest of the
+            // session, which is the one thing currently working.
+            try? await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off (release attempt)")
+            defer {
+                Task { [weak self] in
+                    try? await self?.setProperty(CanonProp.evfOutputDevice, 3,
+                                                 name: "EVFOutputDevice=cameraAndHost (restored)")
+                }
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            for afParam: UInt32 in [1, 0] {
+                let r = try? await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, afParam])
+                note += "af\(afParam)=\(code(of: r)) "
+                _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2])
+                if await objectEventArrived() {
+                    return ReleaseOutcome(fired: true, summary: note + "-> object event")
+                }
+            }
         }
 
         let fired = await objectEventArrived()
