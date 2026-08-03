@@ -84,7 +84,7 @@ public final class BoothViewModel: ObservableObject {
     }
 
     /// USB (ICCTransport) or Wi-Fi (PTPIPTransport), chosen at connect time by
-    /// whether a camera is actually on the cable — see bringUpCanon.
+    /// whether a camera is actually on the cable — see probeUSBThenFallBack.
     private var transport: (any PTPTransport)?
 
     /// True once ICDeviceBrowser has seen a camera on USB during a connect
@@ -106,17 +106,14 @@ public final class BoothViewModel: ObservableObject {
 
     /// Whether to show the camera IP field at all.
     ///
-    /// Sony is Wi-Fi only, so it always needs one. USB Webcam is a cable and
-    /// never does. Canon hides it until a USB probe has actually failed — the
-    /// common case is now "plug the cable in and tap Connect", and putting a
-    /// network field in front of that invites an operator to fill it in when
-    /// nothing needs it.
+    /// Only ever after the cable has been checked and come back empty. USB
+    /// Webcam is a cable path and never needs one; Sony's legacy HTTP client
+    /// and Canon's Wi-Fi transport both do. Putting a network field in front
+    /// of an operator whose camera is already plugged in just invites them to
+    /// fill it in when nothing needs it.
     public var showsIPField: Bool {
-        switch selectedBrand {
-        case .usbWebcam: false
-        case .sony: true
-        case .canonEOS: wifiFallbackVisible
-        }
+        guard wifiFallbackVisible else { return false }
+        return selectedBrand != .usbWebcam
     }
     private var camera: (any TetheredCamera)?
     private var liveViewConsumer: Task<Void, Never>?
@@ -287,7 +284,9 @@ public final class BoothViewModel: ObservableObject {
     /// as a manual tap would, revealing the IP field.
     public func autoConnectIfPossible() {
         guard !autoConnectAttempted, !connectInFlight, camera == nil else { return }
-        guard selectedBrand == .canonEOS else { return }
+        // No brand gate. The probe asks the hardware what is attached rather
+        // than trusting a picker the operator may never have touched, and a
+        // body plugged in over USB should just work whoever made it.
         autoConnectAttempted = true
         connectCamera()
     }
@@ -330,6 +329,80 @@ public final class BoothViewModel: ObservableObject {
     /// enforced by a single await chain rather than hoped for across detached
     /// Tasks.
     private func bringUpCamera(brand: CameraBrand, host: String) {
+        // Look at the cable before consulting the brand picker. Whatever is
+        // plugged in is ground truth; the picker is a fallback for when
+        // nothing is, or for Sony's Wi-Fi HTTP path.
+        Task { [weak self] in await self?.probeUSBThenFallBack(brand: brand, host: host) }
+    }
+
+    /// Cable first, brand picker second.
+    ///
+    /// Two different frameworks have to be asked, because a body's USB mode
+    /// decides which one can even see it:
+    ///
+    /// - **PTP** (`ICDeviceBrowser`) — Canon, Nikon, and Sony in PC Remote.
+    ///   Real shutter, full resolution, flash.
+    /// - **UVC** (`AVCaptureDevice.external`) — anything in webcam mode,
+    ///   including Sony in USB Streaming. Live view, but "capture" is a
+    ///   grabbed video frame.
+    ///
+    /// A camera is in one mode or the other, never both — all three vendors
+    /// make USB mode a one-of-N menu setting. PTP is preferred when both
+    /// somehow appear, since it is the higher-quality path.
+    private func probeUSBThenFallBack(brand: CameraBrand, host: String) async {
+        usbCameraSeen = false
+        wifiFallbackVisible = false
+        cameraCapabilityNote = nil
+        isProbingUSB = true
+        defer { isProbingUSB = false }
+        connectionMessage = "Looking for a camera…"
+
+        let usb = ICCTransport()
+        transport = usb
+        eventConsumer = Task { [weak self] in
+            for await event in usb.events {
+                await self?.handle(event)
+            }
+        }
+        usb.start()
+
+        for _ in 0..<12 {
+            // PTP body — handle(.deviceFound) has already picked its driver.
+            if usbCameraSeen { return }
+
+            // UVC body. Invisible to the browser above, so checked separately.
+            if UVCWebcamCamera.isExternalCameraAttached {
+                eventConsumer?.cancel()
+                eventConsumer = nil
+                usb.stop()
+                transport = nil
+
+                let name = UVCWebcamCamera.externalCameraName ?? "camera"
+                camera = UVCWebcamCamera()
+                cameraCapabilityNote = TetheredCameraFactory.Capability.videoFrameCapture.operatorNote
+                DiagnosticLog.shared.log(.camera, "USB webcam: \(name)")
+                connectionMessage = "Found \(name) — starting live view…"
+                await startRemoteModeAndLiveView()
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+
+        // Nothing on the cable. Drop the browser before anything else opens a
+        // connection — leaving it scanning would have two transports live and
+        // a stale ICCTransport still holding its delegate callbacks.
+        eventConsumer?.cancel()
+        eventConsumer = nil
+        usb.stop()
+        camera = nil
+        transport = nil
+        wifiFallbackVisible = true
+
+        bringUpFromBrandPicker(brand: brand, host: host)
+    }
+
+    private func bringUpFromBrandPicker(brand: CameraBrand, host: String) {
         // Sony speaks HTTP (Camera Remote API), not PTP/IP — no transport
         // handshake to wait on, so it jumps straight to the shared
         // remote-mode + live-view bring-up.
@@ -358,60 +431,13 @@ public final class BoothViewModel: ObservableObject {
             return
         }
 
-        Task { [weak self] in await self?.bringUpCanon(host: host) }
+        Task { [weak self] in await self?.bringUpCanonOverWiFi(host: host) }
     }
-
-    /// Canon over USB when a camera is on the cable, Wi-Fi when there isn't.
-    ///
-    /// USB is preferred and the operator is never asked to choose. It needs no
-    /// AP, no pairing and no IP address, and it measured faster than Wi-Fi on
-    /// both live view (30-36 fps vs 14) and capture (1.94s vs 2.79s) — see
-    /// docs/PHASE0.md. Making that a setting would just be a way to get it
-    /// wrong at a venue.
-    private func bringUpCanon(host: String) async {
-        usbCameraSeen = false
-        wifiFallbackVisible = false
-        cameraCapabilityNote = nil
-        isProbingUSB = true
-        defer { isProbingUSB = false }
-        connectionMessage = "Looking for a camera…"
-
-        let usb = ICCTransport()
-        transport = usb
-        // Wired before start() so the browser cannot report a device into a
-        // stream nobody is reading yet. handle() takes it from .ready onwards,
-        // so a camera on the cable brings itself all the way up with no
-        // further work.
-        eventConsumer = Task { [weak self] in
-            for await event in usb.events {
-                await self?.handle(event)
-            }
-        }
-        usb.start()
-
-        // Probe on .deviceFound, not .ready: ImageCaptureCore indexes the
-        // card's whole catalog before firing ready (~9s on a full card), and
-        // waiting that long before offering the Wi-Fi box would feel broken.
-        // deviceFound is the honest "something is on the cable" signal.
-        for _ in 0..<12 {
-            // handle(.deviceFound) has already picked the protocol actor by the
-            // time this sees the flag.
-            if usbCameraSeen { return }
-            try? await Task.sleep(nanoseconds: 250_000_000)
-        }
-
-        // Nothing on the cable. Drop the browser before opening a PTP/IP
-        // session — leaving it scanning would have two transports live at once
-        // and a stale ICCTransport still holding its delegate callbacks.
-        eventConsumer?.cancel()
-        eventConsumer = nil
-        usb.stop()
-        camera = nil
-        transport = nil
-
-        wifiFallbackVisible = true
-        connectionMessage = "No camera on USB — connecting to \(host)…"
-
+    /// Canon over Wi-Fi PTP/IP. Only reached when nothing was found on the
+    /// cable — USB is preferred and already tried, being faster on both live
+    /// view (30-36 fps vs 14) and capture (1.94s vs 2.79s) and needing no AP,
+    /// pairing or IP address at all. See docs/PHASE0.md.
+    private func bringUpCanonOverWiFi(host: String) async {
         let wifiTransport = PTPIPTransport(host: host)
         transport = wifiTransport
         camera = EOSCamera(transport: wifiTransport)
@@ -427,7 +453,7 @@ public final class BoothViewModel: ObservableObject {
         } catch {
             lastError = "Connect failed: \(error)"
             DiagnosticLog.shared.log(.camera, "connect failed: \(error)")
-            connectionMessage = "No camera found on USB, and the Wi-Fi connection failed. Either plug the camera in with a USB-C cable, or check it is in Remote control (EOS Utility) mode and the IP is right."
+            connectionMessage = "No camera found on the cable, and the Wi-Fi connection failed. Either plug the camera in with a USB-C cable, or check it is in Remote control (EOS Utility) mode and the IP is right."
         }
     }
 

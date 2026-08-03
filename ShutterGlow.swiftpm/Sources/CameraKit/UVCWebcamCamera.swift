@@ -50,6 +50,33 @@ public actor UVCWebcamCamera: TetheredCamera {
 
     public init() {}
 
+    /// Whether a UVC video device is currently attached.
+    ///
+    /// Needed because a body in webcam mode is invisible to `ICDeviceBrowser`
+    /// — it enumerates as a video device, not a still-image one, so the PTP
+    /// probe will never see it. A Sony in USB Streaming mode is exactly this
+    /// case. Auto-detect has to ask both frameworks.
+    ///
+    /// Cheap and synchronous: a discovery session read, no session setup, no
+    /// camera permission prompt.
+    public static var isExternalCameraAttached: Bool {
+        !AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.external],
+            mediaType: .video,
+            position: .unspecified
+        ).devices.isEmpty
+    }
+
+    /// Name of the attached UVC device, for logging and for telling the
+    /// operator what was found.
+    public static var externalCameraName: String? {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.external],
+            mediaType: .video,
+            position: .unspecified
+        ).devices.first?.localizedName
+    }
+
     public func enterRemoteMode() async throws {
         guard !configured else { return }
 

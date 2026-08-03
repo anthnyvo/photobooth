@@ -22,12 +22,17 @@ public enum TetheredCameraFactory {
         /// built on the video feed (AR props, Boomerang, GIF, timelapse,
         /// smile shutter) has nothing to read.
         case captureOnly
+        /// UVC webcam mode: live view and everything built on it works, but
+        /// "capture" freezes a video frame rather than firing the shutter —
+        /// no flash sync, and resolution capped at the stream, not the sensor.
+        case videoFrameCapture
 
         public var operatorNote: String? {
             switch self {
             case .full: nil
             case .unverified: "This body has never been tested on real hardware. Check a shot before guests arrive."
             case .captureOnly: "Photos will work. Live preview, AR props and Boomerang will not — this body has no preview over USB."
+            case .videoFrameCapture: "Webcam mode: photos are grabbed from the video feed, so there is no flash and lower resolution than the sensor can do."
             }
         }
     }
