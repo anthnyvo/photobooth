@@ -140,6 +140,7 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
             return
         }
 
+        emit(.log("teardown: requesting ICC session close"))
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             closeWaiter = continuation
             camera.requestCloseSession()
@@ -153,6 +154,7 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         browser.stop()
         self.camera = nil
         isReady = false
+        emit(.log("teardown: ICC session closed, browser stopped"))
     }
 
     private var closeWaiter: CheckedContinuation<Void, Never>?

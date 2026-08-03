@@ -609,18 +609,24 @@ public actor EOSCamera {
         // Properties first, remote mode last — the body stops accepting
         // property sets once it is out of remote mode, so the order is not
         // interchangeable.
-        await bounded(seconds: 1.5) { [transport] in
-            _ = try? await transport.send(code: CanonOp.resetUILock)
+        log("teardown: starting")
+        await bounded(seconds: 1.5) { [transport, weak self] in
+            let unlock = try? await transport.send(code: CanonOp.resetUILock)
+            await self?.log("teardown: ResetUILock -> \(Self.describe(unlock))")
+
             var card = Data()
             card.appendLE(UInt32(12))
             card.appendLE(CanonProp.captureDestination)
             card.appendLE(CanonProp.captureDestinationCard)
-            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
+            let dest = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
+            await self?.log("teardown: CaptureDestination=Card -> \(Self.describe(dest))")
+
             var evf = Data()
             evf.appendLE(UInt32(12))
             evf.appendLE(CanonProp.evfOutputDevice)
             evf.appendLE(UInt32(0))
-            _ = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
+            let off = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
+            await self?.log("teardown: EVFOutputDevice=off -> \(Self.describe(off))")
         }
 
         // Its own budget, deliberately. Sharing one with the restores above
@@ -628,10 +634,11 @@ public actor EOSCamera {
         // never ran — leaving the body in remote mode, showing the PC icon,
         // and refusing to reconnect until power-cycled. Of everything in this
         // teardown, this is the one that must not be skipped.
-        await bounded(seconds: 1.5) { [transport] in
-            _ = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
+        await bounded(seconds: 1.5) { [transport, weak self] in
+            let off = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
+            await self?.log("teardown: SetRemoteMode(0) -> \(Self.describe(off))")
         }
-        log("remote mode released")
+        log("teardown: done")
 
         state = .idle
     }
@@ -639,6 +646,17 @@ public actor EOSCamera {
     /// Run `work`, giving up after `seconds`. Teardown also happens on the
     /// yanked-cable path where every send hangs until it fails, and a booth
     /// must not stall there.
+    /// Response code as text, or why there wasn't one. Teardown is the one
+    /// place a silent failure is invisible AND expensive: a body left in PC
+    /// mode refuses to reconnect until power-cycled, and until 2026-08-03 the
+    /// booth path never wired a log sink at all, so none of this was ever
+    /// seen.
+    nonisolated static func describe(_ result: PTPTransactionResult?) -> String {
+        guard let result else { return "send threw (transport already closed?)" }
+        guard let code = result.response?.code else { return "no response container" }
+        return String(format: "0x%04X", code)
+    }
+
     private func bounded(seconds: Double, _ work: @escaping @Sendable () async -> Void) async {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await work() }

@@ -376,6 +376,21 @@ public final class BoothViewModel: ObservableObject {
         teardownTask = nil
     }
 
+    /// Route the camera driver's own log into the on-device diagnostic log.
+    ///
+    /// Only the spike screen ever did this, so on the booth path every [EOS]
+    /// line — the whole connect sequence, every property set, and all of
+    /// teardown — went nowhere. Three attempts at the camera-left-in-PC-mode
+    /// bug were made without being able to see any of it.
+    private func wireCameraLogging(_ camera: any TetheredCamera) {
+        guard let eos = camera as? EOSCamera else { return }
+        Task {
+            await eos.setLogSink { line in
+                DiagnosticLog.shared.log(.camera, line)
+            }
+        }
+    }
+
     /// Second half of connectCamera, run only after the previous camera and
     /// transport have fully disconnected. Kept separate so that ordering is
     /// enforced by a single await chain rather than hoped for across detached
@@ -497,7 +512,9 @@ public final class BoothViewModel: ObservableObject {
     private func bringUpCanonOverWiFi(host: String) async {
         let wifiTransport = PTPIPTransport(host: host)
         transport = wifiTransport
-        camera = EOSCamera(transport: wifiTransport)
+        let eos = EOSCamera(transport: wifiTransport)
+        camera = eos
+        wireCameraLogging(eos)
 
         eventConsumer = Task { [weak self] in
             for await event in wifiTransport.events {
@@ -525,6 +542,7 @@ public final class BoothViewModel: ObservableObject {
             if let usb = transport as? ICCTransport, camera == nil {
                 let match = TetheredCameraFactory.make(deviceName: usb.deviceName, transport: usb)
                 camera = match.camera
+                wireCameraLogging(match.camera)
                 cameraCapabilityNote = match.capability.operatorNote
                 DiagnosticLog.shared.log(.camera, "USB camera: \(match.describedAs) (\(match.capability))")
             }
