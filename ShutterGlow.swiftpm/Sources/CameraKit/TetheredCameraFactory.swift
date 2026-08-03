@@ -64,10 +64,15 @@ public enum TetheredCameraFactory {
                          describedAs: deviceName ?? "Nikon")
         }
 
-        // Everything else, Sony included. Sony bodies do speak PTP over USB
-        // and will capture through this path, but their live view is a vendor
-        // extension this app has not implemented — SonyCamera is the legacy
-        // HTTP/Wi-Fi client and cannot be driven over a cable.
+        // Sony reports itself as e.g. "ILCE-7M4" rather than the brand, so
+        // match the model prefixes too: ILCE covers the Alpha line, DSC the
+        // RX/ZV compacts.
+        if name.contains("sony") || name.contains("ilce") || name.contains("dsc") {
+            return Match(camera: SonyPTPCamera(transport: transport),
+                         capability: .unverified,
+                         describedAs: deviceName ?? "Sony")
+        }
+
         return Match(camera: GenericPTPCamera(transport: transport),
                      capability: .captureOnly,
                      describedAs: deviceName ?? "camera")
