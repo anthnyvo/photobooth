@@ -97,6 +97,23 @@ For comparison the Wi-Fi PTP/IP path this project was rebuilt around gets 14 fps
 captures (T4's real bar), 60-minute endurance (T6), and the 4-hour power question (T7).
 This work lives on `spike/usb-liveview-blob-diagnostic` and is not merged.
 
+### iOS holds the USB device for the life of the process
+
+Later on 2026-08-03, and worth knowing before touching teardown: closing the session
+does **not** release the camera. A full clean teardown — every PTP restore returning
+`0x2001`, `requestCloseSession` completing, every reference dropped, and `ICCTransport`
+confirmed deallocating — still leaves the EOS R showing its PC-connection icon and
+refusing to re-enumerate. The retry probe immediately after finds nothing. Only
+force-quitting the app clears it.
+
+Three separate fixes were aimed at the teardown sequence before the on-device log proved
+it was the wrong target. **There is no teardown sequence that fixes this.**
+
+The design that follows from it: a wired session is **kept alive** across a booth exit
+and reused, rather than torn down. The camera is physically attached and about to be
+reconnected; disconnecting it came from the Wi-Fi design, where an idle socket is worth
+dropping. Wi-Fi keeps the old teardown for exactly that reason.
+
 ### Four bugs, one root cause
 
 1. **The transport discarded the data phase.** `requestSendPTPCommand`'s completion
