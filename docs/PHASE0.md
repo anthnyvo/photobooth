@@ -89,12 +89,14 @@ what this document set out to prove and then wrongly concluded was impossible.
 | Capture round trip (USB) | pass | **1.94s** for a 6,089,569-byte full-res JPEG |
 | Release path | pass | bare `RemoteRelease` 0x910F, fires in ~3s |
 | Retrieval | pass | `ObjectAddedEx64` handle → `GetObjectInfo` + `GetObject` |
+| **20 consecutive captures (T4)** | **pass** | 2026-08-05, commit `4437d6f`. All 20 fired and landed, no wedge, round trip held, transaction deadline never tripped |
+| **Reconnect after booth exit** | **pass** | 2026-08-05. Live view returns on the kept-alive session, camera never shows its PC icon |
 
 For comparison the Wi-Fi PTP/IP path this project was rebuilt around gets 14 fps and
 2.79s. USB is faster on both, and needs no AP, no pairing and no pre-flight.
 
-**Still outstanding before this replaces the Wi-Fi path in the booth:** 20 consecutive
-captures (T4's real bar), 60-minute endurance (T6), and the 4-hour power question (T7).
+**Still outstanding before this replaces the Wi-Fi path in the booth:** 60-minute
+endurance (T6), the 4-hour power question (T7), and deliberate cable-pull recovery.
 This work lives on `spike/usb-liveview-blob-diagnostic` and is not merged.
 
 ### iOS holds the USB device for the life of the process
