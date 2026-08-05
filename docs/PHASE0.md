@@ -114,6 +114,28 @@ and reused, rather than torn down. The camera is physically attached and about t
 reconnected; disconnecting it came from the Wi-Fi design, where an idle socket is worth
 dropping. Wi-Fi keeps the old teardown for exactly that reason.
 
+### A cancelled consumer is not a stopped producer
+
+The kept-alive design above took three passes to actually work, and the last one is the
+generalisable finding. **Verified working on the EOS R, 2026-08-05.**
+
+`backToEventPicker()` cancels the UI's frame reader. It does not stop `EOSCamera`'s poll
+loop, and that loop is **not self-limiting**: `AsyncStream` with `.bufferingNewest(1)`
+*drops* a yield nobody is reading rather than applying back-pressure. So the driver kept
+issuing `GetViewFinderData` every ~10ms into a stream with no consumer, for as long as
+the operator stayed on the event list. Every one of those transactions occupies
+`ICCTransport`'s single serial worker, so the reconnect's first command queued behind
+minutes of backlog and the screen sat on "starting live view" indefinitely.
+
+From the reading end the stream looked idle. From the writing end it was saturating a
+shared resource. A lossy buffering policy is what hides the difference.
+
+`TetheredCamera` now has `pauseLiveView()` / `resumeLiveView()`, defaulted in a protocol
+extension — pausing is an optimisation, resuming has to work, so the default falls back
+to a full `startLiveView()`. `EOSCamera.resumeLiveView()` skips the mode property and the
+500ms sensor settle that `startLiveView()` needs, because the body never stopped
+streaming.
+
 ### Four bugs, one root cause
 
 1. **The transport discarded the data phase.** `requestSendPTPCommand`'s completion
