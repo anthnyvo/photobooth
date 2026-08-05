@@ -120,6 +120,16 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         emit(.log(message))
     }
 
+    /// How long a single PTP transaction may go unanswered before `send()`
+    /// gives up on it. See the deadline race in `send()` for why one exists
+    /// at all; raise this rather than adding a second timeout anywhere else.
+    ///
+    /// 20s. The only failure mode this guards is a completion that never
+    /// arrives, which is unrecoverable and should be vanishingly rare, so
+    /// the number wants to sit far above any legitimate slow transaction. A
+    /// capture that would have succeeded must never trip it.
+    static let transactionDeadlineNanoseconds: UInt64 = 20_000_000_000
+
     public override init() {
         super.init()
         browser.delegate = self
@@ -251,6 +261,15 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
             // completion can still arrive after the deadline fires — the
             // continuation must be resumed exactly once, or the second
             // attempt crashes the process.
+            //
+            // The deadline is deliberately generous. It exists to break a
+            // permanent wedge, not to enforce a latency budget, so the cost
+            // of setting it too low (failing a capture the camera would have
+            // completed a moment later) is worse than the cost of setting it
+            // too high (a few more seconds of frozen UI in a case that
+            // should never happen). A full-res capture round trip measured
+            // 1.94s on the EOS R — but that was one shot in a quiet room,
+            // not booth pace with the card writing and the buffer full.
             let lock = NSLock()
             var resumed = false
             func resumeOnce(_ continuation: CheckedContinuation<PTPTransactionResult, Error>,
@@ -279,7 +298,7 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
                 }
 
                 Task {
-                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    try? await Task.sleep(nanoseconds: Self.transactionDeadlineNanoseconds)
                     resumeOnce(continuation, .failure(
                         TransportError.timeout("PTP command 0x\(String(code, radix: 16)) never completed")))
                 }
