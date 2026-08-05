@@ -273,6 +273,14 @@ public final class BoothViewModel: ObservableObject {
             cameraBatteryLevel = nil
             lastError = nil
             connectionMessage = "Camera connected"
+            // Re-armed here too, not just on the teardown path below. Without
+            // it the next visit to the connect screen was a dead end on
+            // hardware: autoConnectIfPossible bailed on the stale flag, the
+            // screen showed this "Camera connected" text with no live view
+            // behind it, and both the Connect and retry buttons are hidden
+            // while wifiFallbackVisible is false - so there was nothing left
+            // to tap. Only Event Setup or a force-quit got out.
+            autoConnectAttempted = false
             step = .eventPicker
             return
         }
@@ -336,7 +344,18 @@ public final class BoothViewModel: ObservableObject {
     /// If nothing is on the cable this falls through to the Wi-Fi path exactly
     /// as a manual tap would, revealing the IP field.
     public func autoConnectIfPossible() {
-        guard !autoConnectAttempted, !connectInFlight, camera == nil else { return }
+        guard !connectInFlight else { return }
+        // A wired session kept alive across an event switch has to come back
+        // through here, and it fails the `camera == nil` guard below by
+        // definition - the whole point is that the camera object survived.
+        // connectCamera's reuse fast path is what restarts live view on it;
+        // nothing else calls that path, so without this the kept-alive
+        // session was unreachable from the UI.
+        if let usb = transport as? ICCTransport, usb.hasDevice, camera != nil {
+            connectCamera()
+            return
+        }
+        guard !autoConnectAttempted, camera == nil else { return }
         // No brand gate. The probe asks the hardware what is attached rather
         // than trusting a picker the operator may never have touched, and a
         // body plugged in over USB should just work whoever made it.
@@ -627,6 +646,13 @@ public final class BoothViewModel: ObservableObject {
             lastError = "Live view failed: \(error)"
             DiagnosticLog.shared.log(.camera, "live view resume failed: \(error)")
             connectionMessage = "Camera connected, but live view did not start"
+            // Same dead end as the kept-alive session had: while this stays
+            // false the connect screen has no Connect and no retry button, so
+            // a failed resume left the attendant with nothing to tap. It does
+            // reveal the brand picker and IP field, which is noise on a cable
+            // that is plainly working - but a misleading control beats no
+            // control, and retryCameraSearch re-probes USB either way.
+            wifiFallbackVisible = true
         }
     }
 
