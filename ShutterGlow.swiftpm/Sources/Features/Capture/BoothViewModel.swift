@@ -269,6 +269,15 @@ public final class BoothViewModel: ObservableObject {
 
         if let usb = transport as? ICCTransport, usb.hasDevice {
             DiagnosticLog.shared.log(.camera, "keeping USB session alive across event switch")
+            // Cancelling the reader above stops frames reaching the UI but
+            // NOT the driver's poll loop, which keeps asking the body for
+            // frames at full rate into a stream with no consumer. Left
+            // running it floods the transport's single serial worker for as
+            // long as the operator is away, and the reconnect's first
+            // command queues behind all of it. See EOSCamera.pauseLiveView.
+            if let camera {
+                Task { await camera.pauseLiveView() }
+            }
             liveViewImage = nil
             cameraBatteryLevel = nil
             lastError = nil
@@ -639,8 +648,10 @@ public final class BoothViewModel: ObservableObject {
     /// property for no reason on a session that never dropped.
     private func resumeLiveView(on camera: any TetheredCamera) async {
         do {
-            let frames = try await camera.startLiveView()
+            DiagnosticLog.shared.log(.camera, "resuming live view on kept-alive session")
+            let frames = try await camera.resumeLiveView()
             consumeLiveView(frames)
+            DiagnosticLog.shared.log(.camera, "live view resumed, entering attract")
             step = .attract
         } catch {
             lastError = "Live view failed: \(error)"

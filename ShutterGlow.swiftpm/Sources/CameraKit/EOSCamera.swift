@@ -252,6 +252,50 @@ public actor EOSCamera {
         }
     }
 
+    /// Suspend frame polling without touching the session or EVFOutputDevice.
+    ///
+    /// The poll loop is not self-limiting: `AsyncStream` with
+    /// `.bufferingNewest(1)` drops a yield nobody is reading rather than
+    /// applying back-pressure, so with the UI's reader cancelled this loop
+    /// carried on issuing GetViewFinderData every ~10ms into the void. For
+    /// the whole time an operator sat on the event list — minutes, easily —
+    /// the body was being asked for frames at full rate with no consumer,
+    /// and every one of those transactions occupied the transport's single
+    /// serial worker. Resuming then had to push EVFOutputDevice through that
+    /// same queue, which is the likeliest reason a reconnect sat forever on
+    /// "starting live view".
+    ///
+    /// The continuation is deliberately kept: `resumeLiveView()` finishes it
+    /// explicitly, and dropping it here would strand any reader still in
+    /// `for await` on a stream that then neither yields nor finishes.
+    public func pauseLiveView() {
+        liveViewTask?.cancel()
+        liveViewTask = nil
+        log("live view paused (session kept open)")
+    }
+
+    /// Restart frame delivery on a body that never left live-view mode.
+    ///
+    /// Does NOT re-send EVFOutputDevice or wait out the 500ms settle that
+    /// `startLiveView()` needs — the sensor has been streaming the whole
+    /// time, only our reader went away. Re-sending was not harmless: it put
+    /// a property write at the back of a queue the paused-but-still-running
+    /// poll loop had filled.
+    public func resumeLiveView() async throws -> AsyncStream<Data> {
+        // A stream can only be consumed once, and the previous reader was
+        // cancelled, so the caller needs a new one. Finish the old
+        // continuation rather than just overwriting it.
+        liveViewContinuation?.finish()
+        let (stream, continuation) = AsyncStream.makeStream(of: Data.self,
+            bufferingPolicy: .bufferingNewest(1))
+        liveViewContinuation = continuation
+        liveViewStats = LiveViewStats()
+        state = .liveView
+        startLiveViewPolling()
+        log("live view resumed on the existing session")
+        return stream
+    }
+
     public func stopLiveView() async throws {
         liveViewTask?.cancel()
         liveViewTask = nil

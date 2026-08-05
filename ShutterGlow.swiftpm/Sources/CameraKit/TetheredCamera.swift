@@ -20,6 +20,27 @@ public protocol TetheredCamera: Actor {
     /// EOSCamera restores properties it changed and waits for them to land,
     /// since a body left reconfigured writes photos nowhere.
     func disconnect() async
+
+    /// Stop pulling frames without ending the session, for a wired camera
+    /// kept alive while nobody is watching the feed (the operator stepped
+    /// back to the event list). The body stays in live-view mode.
+    func pauseLiveView() async
+    /// Hand back a fresh frame stream on a body that is already streaming,
+    /// undoing `pauseLiveView()`. Distinct from `startLiveView()` because
+    /// the session never dropped: no mode properties get re-sent and there
+    /// is no sensor settle time to wait out.
+    func resumeLiveView() async throws -> AsyncStream<Data>
+}
+
+public extension TetheredCamera {
+    /// Default for drivers with no separate poll loop to suspend (UVC, and
+    /// the PTP bodies whose live view is a probe that has not been proven on
+    /// hardware). Pausing is an optimisation; resuming has to work, so it
+    /// falls back to a full start.
+    func pauseLiveView() async {}
+    func resumeLiveView() async throws -> AsyncStream<Data> {
+        try await startLiveView()
+    }
 }
 
 /// Guest-facing camera brand choice on the connect screen. Canon (Wi-Fi
