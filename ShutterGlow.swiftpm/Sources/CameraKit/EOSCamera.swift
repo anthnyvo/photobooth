@@ -596,6 +596,12 @@ public actor EOSCamera {
         // while it is being handed back.
         eventLoopTask?.cancel()
         liveViewTask?.cancel()
+        // stopLiveView() does this too — without it, any consumer of
+        // startLiveView()'s stream other than BoothViewModel (which cancels
+        // its own reader independently on every disconnect path) sits in
+        // `for await` on a stream that neither yields nor finishes.
+        liveViewContinuation?.finish()
+        liveViewContinuation = nil
 
         // Awaited, not fired into the dark. These used to run in a detached
         // Task while the transport was already closing, so they raced the

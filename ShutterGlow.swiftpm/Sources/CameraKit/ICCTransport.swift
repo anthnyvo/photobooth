@@ -140,11 +140,22 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         emit(.log("ICDeviceBrowser started"))
     }
 
+    /// Synchronous sibling of `disconnect()` for call sites that need to
+    /// move on immediately (no camera was ever confirmed on the cable, so
+    /// there's nothing worth awaiting a close confirmation for) — but still
+    /// drops every reference ImageCaptureCore could hold, matching
+    /// disconnect()'s cleanup. Previously skipped the delegate-nilling and
+    /// continuation-finishing disconnect() does, which was harmless only
+    /// because every existing call site drops this whole object right after;
+    /// consolidated so a future call site can't reintroduce that leak.
     public func stop() {
         camera?.requestCloseSession()
+        camera?.delegate = nil
+        browser.delegate = nil
         browser.stop()
         camera = nil
         isReady = false
+        eventContinuation?.finish()
     }
 
     /// PTPTransport conformance — and, unlike `stop()`, it WAITS for the
@@ -224,19 +235,53 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
                                          parameters: parameters)
             let command = container.encoded()
 
+            // ImageCaptureCore exposes no way to cancel a pending
+            // requestSendPTPCommand, unlike PTPIPTransport's NWConnection
+            // reads, where `.cancel()` forces the receive callback to fire.
+            // Left unguarded, one dropped completion (cable glitch, camera
+            // hiccup) wedges this SerialGate's single worker forever — every
+            // later send(), including this transport's own disconnect(),
+            // queues behind it and never runs. The outer `withTimeout`
+            // wrapping capturePhoto() can't rescue it either: cancelling
+            // this task does nothing observable to a bare continuation with
+            // no cancellation handler. A deadline race here, independent of
+            // Task cancellation, is the only way to free the worker.
+            //
+            // `resumed`, guarded by a lock, exists because the real
+            // completion can still arrive after the deadline fires — the
+            // continuation must be resumed exactly once, or the second
+            // attempt crashes the process.
+            let lock = NSLock()
+            var resumed = false
+            func resumeOnce(_ continuation: CheckedContinuation<PTPTransactionResult, Error>,
+                            _ result: Result<PTPTransactionResult, Error>) {
+                lock.lock()
+                let already = resumed
+                resumed = true
+                lock.unlock()
+                guard !already else { return }
+                continuation.resume(with: result)
+            }
+
             return try await withCheckedThrowingContinuation { continuation in
                 camera.requestSendPTPCommand(command, outData: outData) { dataPhase, responseBlob, error in
                     if let error {
-                        continuation.resume(throwing: TransportError.sendFailed(underlying: error))
+                        resumeOnce(continuation, .failure(TransportError.sendFailed(underlying: error)))
                         return
                     }
                     // `as Data?` rather than a plain `??`: ImageCaptureCore's
                     // block has no nullability annotations, so these import as
                     // Data, Data? or Data! depending on SDK, and this form
                     // compiles (and stays nil-safe) in all three.
-                    continuation.resume(returning: PTPTransactionResult.from(
+                    resumeOnce(continuation, .success(PTPTransactionResult.from(
                         dataPhase: (dataPhase as Data?) ?? Data(),
-                        responseBlob: (responseBlob as Data?) ?? Data()))
+                        responseBlob: (responseBlob as Data?) ?? Data())))
+                }
+
+                Task {
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    resumeOnce(continuation, .failure(
+                        TransportError.timeout("PTP command 0x\(String(code, radix: 16)) never completed")))
                 }
             }
         }

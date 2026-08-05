@@ -28,9 +28,20 @@ public actor LocalPhotoServer {
     /// code, could enumerate nearby timestamps and pull down other guests'
     /// photos. The URL now carries an unguessable token instead of the
     /// real filename, and the server only ever serves tokens it minted.
-    private var tokens: [String: URL] = [:]
+    ///
+    /// Tokens never used to expire, and nothing ever called `stop()` — so a
+    /// photographed QR code or captured URL stayed valid on the venue Wi-Fi
+    /// for the rest of the app's life, not just the guest's session. Each
+    /// token now carries its mint time and is refused past `tokenLifetime`.
+    private var tokens: [String: (url: URL, mintedAt: Date)] = [:]
+    private let tokenLifetime: TimeInterval = 30 * 60
 
     private init() {}
+
+    private func pruneExpiredTokens() {
+        let cutoff = Date().addingTimeInterval(-tokenLifetime)
+        tokens = tokens.filter { $0.value.mintedAt > cutoff }
+    }
 
     public func start() throws {
         guard listener == nil else { return }
@@ -55,10 +66,11 @@ public actor LocalPhotoServer {
     /// fresh random token for this photo each call rather than exposing its
     /// real filename.
     public func url(forPhoto photoURL: URL) -> URL? {
+        pruneExpiredTokens()
         guard let ip = NetworkInfo.wifiIPv4Address() else { return nil }
         let token = (0..<24).map { _ in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".randomElement()! }
         let tokenString = String(token)
-        tokens[tokenString] = photoURL
+        tokens[tokenString] = (photoURL, Date())
         return URL(string: "http://\(ip):\(Self.port)/photos/\(tokenString)")
     }
 
@@ -124,7 +136,12 @@ public actor LocalPhotoServer {
         // url(forPhoto:) — no path traversal surface at all, since the
         // request never supplies a filename or path, just an opaque token
         // looked up against server-side state.
-        return tokens[token]
+        guard let entry = tokens[token] else { return nil }
+        guard entry.mintedAt > Date().addingTimeInterval(-tokenLifetime) else {
+            tokens[token] = nil
+            return nil
+        }
+        return entry.url
     }
 
     private func respond(_ connection: NWConnection, status: String, body: Data, contentType: String = "text/plain") async {

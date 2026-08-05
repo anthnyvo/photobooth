@@ -8,6 +8,11 @@ public final class EventStorage {
 
     private let fileManager = FileManager.default
     private let currentEventKey = "com.anthonyvo.photobooth.currentEventId"
+    /// Guards appendLead's read-modify-write: two near-simultaneous
+    /// submissions (a double-tapped Continue on the guest data-capture form)
+    /// could otherwise both read the same leads.json before either wrote
+    /// back, and the second write would silently drop the first lead.
+    private let leadsLock = NSLock()
 
     private var eventsRoot: URL {
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -221,6 +226,8 @@ public final class EventStorage {
     }
 
     public func appendLead(_ lead: GuestLead, eventId: String) {
+        leadsLock.lock()
+        defer { leadsLock.unlock() }
         var leads = loadLeads(eventId: eventId)
         leads.append(lead)
         guard let data = try? JSONEncoder().encode(leads) else { return }
