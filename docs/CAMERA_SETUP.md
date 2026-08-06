@@ -4,19 +4,21 @@ Steps to configure the camera before each event/test session. Skipping any of
 these reproduces bugs that took a full day to root-cause once — see
 `docs/PHASE0.md` for the investigation history.
 
-> **Changed 2026-08-03: USB is now the connection method for camera control.**
-> Plug a data-capable USB-C cable from camera to iPad and that is the whole
-> setup — no AP, no pairing, no IP address, no pre-flight. It is also faster
+> **USB is the connection method for camera control.** Plug a data-capable
+> USB-C cable from camera to iPad and that is the whole setup — no AP, no
+> pairing, no IP address, no pre-flight, and nothing to tap. It is also faster
 > than Wi-Fi on both counts (30-36 fps live view vs 14, 1.94s capture vs
-> 2.79s).
+> 2.79s), and has since passed 20 consecutive captures at booth pace
+> (2026-08-05).
 >
-> **Wi-Fi is still relevant, but for a different reason.** Guest QR sharing
-> needs the iPad and the guests' phones on one network — see §3. The camera
-> no longer needs to be on it.
+> **The camera does not need to be on any network.** Guest QR sharing needs
+> the *iPad* and the guests' phones on one network — see §3. This is a change
+> from how it used to work, and the most common wasted setup step now is
+> putting the camera on the venue Wi-Fi for a reason that no longer exists.
 >
 > This is on the `spike/usb-liveview-blob-diagnostic` branch and is not
 > merged, so the shipping build still uses Wi-Fi for control. Steps below
-> cover both.
+> cover both; the Wi-Fi ones are marked.
 
 ## 1. Card
 
@@ -32,19 +34,33 @@ fully-electronic Canon lens (manual glass, third-party adapter, etc.):
   Without this, the body refuses to fire at all when it can't detect a
   communicating lens, independent of anything the app does.
 
-## 3. Wi-Fi mode
+## 3. Network — for guest sharing only, not for the camera
 
-Camera Wi-Fi menu has two connection modes — pick based on venue:
+**Over USB there is nothing to do here for camera control.** Skip to §4 unless
+the event uses QR sharing.
 
-- **Venue Wi-Fi available (preferred):** join the venue's existing network
-  (infrastructure/client mode), same network the phone joins. This is what
-  makes QR sharing work — the phone hosts a small local server guests reach
-  by scanning a code, which only works if camera + phone + guests share one
-  network.
-- **No venue Wi-Fi:** camera creates its own private network (auto-AP), phone
-  joins that directly. PTP/IP control still works fine this way — you just
-  lose QR sharing (guest phones can't reach the booth phone's server), so
-  disable the QR toggle in Event Setup for that event.
+**If QR sharing is on:** the *iPad* must be joined to a network the guests'
+phones can also reach — normally the venue Wi-Fi. The iPad hosts a small local
+server that guests reach by scanning a code, so what matters is that the iPad
+has a real LAN address. **The camera is not part of this and does not need to
+be on any network.** An earlier version of this section said QR sharing needed
+camera + phone + guests on one network; that was true only while the camera
+was also the control link.
+
+If there is no usable venue Wi-Fi, turn the QR toggle off in Event Setup for
+that event and use AirDrop or print instead.
+
+### Wi-Fi control mode (fallback path only)
+
+Only needed if you are running the Wi-Fi build, or the cable has failed and
+the app has revealed the IP field.
+
+- **Venue Wi-Fi available:** join the venue's existing network
+  (infrastructure/client mode), same network the iPad is on. Keeps QR sharing
+  working.
+- **No venue Wi-Fi:** camera creates its own private network (auto-AP), iPad
+  joins that directly. PTP/IP control works, but the iPad is then off the
+  venue network, so QR sharing is gone.
 
 Either way: **Wi-Fi Function → Remote control (EOS Utility)**, not "Connect to
 smartphone" — that's Camera Connect's own app-specific pairing scheme and
@@ -78,8 +94,20 @@ confirmed on hardware 2026-08-03:
 
 **Over USB (preferred).** Launch the app first, then plug the camera in — the
 device browser picks it up on connection, and a camera already attached at
-launch may not enumerate. Tap Connect via USB. Expect live view in a couple of
-seconds. Nothing to configure on the camera beyond §1 and §2.
+launch may not enumerate.
+
+**There is nothing to tap.** Picking an event goes straight to a searching
+screen and the camera connects on its own; live view appears a couple of
+seconds later. Nothing to configure on the camera beyond §1 and §2.
+
+If the cable search comes back empty the app reveals the IP field and a
+**Search for camera again** button. Plug the cable in (or wake the camera) and
+use that button rather than backing out — it re-probes USB, it does not just
+retry the address in the box.
+
+Backing out to the event list keeps the wired session open on purpose, so
+picking another event reconnects instantly. See `docs/PHASE0.md` for why
+tearing it down was worse.
 
 **Over Wi-Fi.** Enter the camera's IP (auto-AP mode: usually `192.168.1.2`;
 venue Wi-Fi mode: check the camera's Wi-Fi info screen), tap Connect.
@@ -107,12 +135,15 @@ the 2026-08-03 investigation, which turned out to be §4 — but it is a real
 setting and a real cause on adapted glass.
 
 **QR code button shows "not connected to Wi-Fi" or guests can't reach the
-scan link:** confirm the camera is in venue Wi-Fi mode (§3), not its own
-private AP — the two networks aren't bridged, so a phone joined to the
-camera's own AP can't be reached by anyone else.
+scan link:** check the **iPad's** network, not the camera's (§3). The iPad
+needs a real LAN address on the same network the guests are on. Joining the
+camera's own AP is the usual cause — it isn't bridged to anything, so nobody
+else can reach the iPad. Over USB the camera's network state is irrelevant
+here.
 
 **Mid-event Wi-Fi drop — app recovers to the connect screen but won't
 reconnect no matter how many times you tap Connect:** expected, not a bug.
+Wi-Fi path only; the cable does not have this failure mode.
 When the camera's own Wi-Fi session drops, its firmware fully exits Remote
 control (EOS Utility) mode rather than just losing the link — it needs to be
 manually re-armed **on the camera itself** (Wi-Fi menu → Remote control (EOS

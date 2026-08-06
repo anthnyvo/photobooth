@@ -111,10 +111,17 @@ struct BoothRootView: View {
     }
 }
 
-/// Attendant setup step: connect to the camera over Wi-Fi before the guest
-/// flow can start. Camera must already be in Remote control (EOS Utility)
-/// mode with the iPad/iPhone joined to its network. While a connect attempt
-/// is running, radar rings pulse outward from the camera mark.
+/// Attendant setup step, between picking an event and the guest flow.
+///
+/// Normally passed through without a tap: `.task` probes the cable on
+/// appearance and a wired camera connects on its own. The brand picker, IP
+/// field and retry button only appear once that probe has completed and
+/// failed — see `wifiFallbackVisible`, which gates all of them. Wi-Fi is the
+/// fallback, and only there does the camera need to be in Remote control
+/// (EOS Utility) mode with the iPad joined to its network.
+///
+/// While a connect attempt is running, radar rings pulse outward from the
+/// camera mark.
 private struct ConnectView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
