@@ -56,6 +56,17 @@ struct SpikeView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isCapturing)
 
+                // Fires one GetViewFinderData and dumps the anatomy of BOTH
+                // blobs ImageCaptureCore returns. Only meaningful over USB —
+                // PTPIPTransport speaks the wire protocol directly and has no
+                // such split, so param 1 is always empty there.
+                Button(action: model.runViewFinderDiagnostic) {
+                    Label("Diagnose live view blob", systemImage: "stethoscope")
+                        .frame(maxWidth: .infinity)
+                        .padding(8)
+                }
+                .buttonStyle(.bordered)
+
                 if let capture = model.lastCapture {
                     HStack(alignment: .top, spacing: 12) {
                         Image(uiImage: capture)

@@ -111,10 +111,17 @@ struct BoothRootView: View {
     }
 }
 
-/// Attendant setup step: connect to the camera over Wi-Fi before the guest
-/// flow can start. Camera must already be in Remote control (EOS Utility)
-/// mode with the iPad/iPhone joined to its network. While a connect attempt
-/// is running, radar rings pulse outward from the camera mark.
+/// Attendant setup step, between picking an event and the guest flow.
+///
+/// Normally passed through without a tap: `.task` probes the cable on
+/// appearance and a wired camera connects on its own. The brand picker, IP
+/// field and retry button only appear once that probe has completed and
+/// failed — see `wifiFallbackVisible`, which gates all of them. Wi-Fi is the
+/// fallback, and only there does the camera need to be in Remote control
+/// (EOS Utility) mode with the iPad joined to its network.
+///
+/// While a connect attempt is running, radar rings pulse outward from the
+/// camera mark.
 private struct ConnectView: View {
     @ObservedObject var model: BoothViewModel
     let theme: Theme
@@ -169,6 +176,14 @@ private struct ConnectView: View {
                     .animation(.easeOut(duration: 0.3), value: model.connectionMessage)
                     .entrance(entered, delay: 0.06)
 
+                // Shown only once the cable has been checked and come back
+                // empty. Gating on wifiFallbackVisible rather than
+                // !isProbingUSB is deliberate: isProbingUSB starts false, so
+                // the screen painted the picker and IP box for one frame
+                // before the probe flipped it, which is what "it still goes to
+                // the IP page first" was. This flag only ever becomes true
+                // after a completed, failed probe, so there is no such window.
+                if model.wifiFallbackVisible {
                 // Camera brand picker. Only three brands ship, all short
                 // labels, so they sit centered in one row rather than a
                 // left-aligned scroller.
@@ -205,13 +220,15 @@ private struct ConnectView: View {
                 .entrance(entered, delay: 0.1)
 
                 VStack(spacing: 14) {
-                    // Wired UVC webcam mode has no IP to enter — it's a
-                    // cable, not a network connection.
-                    if model.selectedBrand != .usbWebcam {
+                    // Only shown for a transport that actually needs an
+                    // address — see BoothViewModel.showsIPField. Canon now
+                    // tries USB first and only reveals this if no camera is
+                    // found on the cable.
+                    if model.showsIPField {
                         ChassisLabel(text: "Camera IP", size: 10)
                     }
                     HStack(spacing: 12) {
-                        if model.selectedBrand != .usbWebcam {
+                        if model.showsIPField {
                             TextField("192.168.1.2", text: $model.cameraIPText)
                                 .font(.system(.body, design: .monospaced))
                                 .foregroundStyle(Chassis.textPrimary)
@@ -238,6 +255,33 @@ private struct ConnectView: View {
                 }
                 .padding(20)
                 .chassisPanel()
+                }
+
+                // Explicit retry. The Connect button below re-probes USB too,
+                // but it reads as "connect using the address in this box",
+                // so an attendant who has just plugged the cable in after the
+                // search failed has no obvious way to ask again.
+                if model.wifiFallbackVisible {
+                    Button(action: model.retryCameraSearch) {
+                        Label("Search for camera again", systemImage: "arrow.clockwise")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Chassis.textPrimary)
+                            .padding(.vertical, 13)
+                            .padding(.horizontal, 22)
+                            .background(Capsule().fill(.ultraThinMaterial))
+                            .overlay(Capsule().strokeBorder(Chassis.hairline, lineWidth: 1))
+                    }
+                    .buttonStyle(PressableStyle())
+                    .padding(.top, 4)
+                }
+
+                if let note = model.cameraCapabilityNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(Chassis.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
 
                 if let error = model.lastError {
                     Text(error)
@@ -247,12 +291,19 @@ private struct ConnectView: View {
                         .padding(.horizontal, 40)
                 }
 
+                // Still reachable here, but no longer the only route: editing
+                // now lives on the event list, next to the events themselves,
+                // rather than behind a camera-connect step.
                 GhostButton(title: "Event Setup") { showAdmin = true }
                     .padding(.top, 20)
                     .entrance(entered, delay: 0.18)
             }
         }
         .onAppear { entered = true }
+        // Reach for the cable before the operator reaches for the screen. If
+        // no camera is attached this falls through to the Wi-Fi path and
+        // reveals the IP field, same as tapping Connect would.
+        .task { model.autoConnectIfPossible() }
         .sheet(isPresented: $showAdmin) {
             PINGate {
                 AdminView(model: model)

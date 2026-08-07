@@ -23,13 +23,19 @@ public enum UVCWebcamError: Error, LocalizedError {
 /// AVFoundation — iPadOS 17+'s `.external` AVCaptureDevice type. No vendor
 /// SDK, no PTP at all.
 ///
-/// This exists because PTP-based live view is a dead end on iOS (see
-/// docs/PHASE0.md — ImageCaptureCore's passthrough API never surfaces the
-/// bulk data phase `GetViewFinderData` needs, confirmed on hardware). UVC
-/// sidesteps that by not touching PTP for anything: live view AND capture
-/// both come from the same video stream, so there's no dependency on
-/// whether PTP and USB Streaming mode can even coexist on one cable
-/// (unconfirmed, and irrelevant to this path).
+/// This exists because Phase 0 concluded PTP-based live view was a dead end
+/// on iOS. That conclusion is IN DOUBT as of 2026-08-01 (see docs/PHASE0.md)
+/// and this path may turn out to be unnecessary. It stands on its own
+/// regardless: UVC touches no PTP at all, so live view AND capture come from
+/// the same video stream.
+///
+/// Worth recording, since it was researched on 2026-08-01 and is settled:
+/// UVC webcam mode and PTP are mutually exclusive on Sony, Canon and Nikon.
+/// All three make USB mode a one-of-N menu selection, and entering streaming
+/// tears the PTP function down — Nikon states it outright ("communications
+/// with the computer/smart device other than the streaming software"
+/// unavailable while streaming). So this path can never be combined with a
+/// PTP path over the same cable, whatever happens to the Phase 0 question.
 ///
 /// Real trade-off, not hidden: "capture" here freezes the newest video
 /// frame rather than firing the camera's actual mechanical shutter — no
@@ -43,6 +49,33 @@ public actor UVCWebcamCamera: TetheredCamera {
     private var configured = false
 
     public init() {}
+
+    /// Whether a UVC video device is currently attached.
+    ///
+    /// Needed because a body in webcam mode is invisible to `ICDeviceBrowser`
+    /// — it enumerates as a video device, not a still-image one, so the PTP
+    /// probe will never see it. A Sony in USB Streaming mode is exactly this
+    /// case. Auto-detect has to ask both frameworks.
+    ///
+    /// Cheap and synchronous: a discovery session read, no session setup, no
+    /// camera permission prompt.
+    public static var isExternalCameraAttached: Bool {
+        !AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.external],
+            mediaType: .video,
+            position: .unspecified
+        ).devices.isEmpty
+    }
+
+    /// Name of the attached UVC device, for logging and for telling the
+    /// operator what was found.
+    public static var externalCameraName: String? {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.external],
+            mediaType: .video,
+            position: .unspecified
+        ).devices.first?.localizedName
+    }
 
     public func enterRemoteMode() async throws {
         guard !configured else { return }

@@ -9,6 +9,16 @@ struct EventPickerView: View {
     @ObservedObject var model: BoothViewModel
     @State private var events: [EventConfig] = []
     @State private var showingNewEvent = false
+    /// Non-nil while an event from the list is being edited. Editing lives
+    /// here rather than on the camera-connect screen: picking which event to
+    /// change belongs next to the list of them, not behind a camera setup
+    /// step the attendant may not even reach.
+    @State private var editingEvent: EditTarget?
+
+    /// Wrapper so `.sheet(item:)` has something Identifiable to key on.
+    /// Retroactively conforming String to Identifiable would apply app-wide
+    /// for one sheet, which is not a trade worth making.
+    private struct EditTarget: Identifiable { let id: String }
     @State private var entered = false
 
     var body: some View {
@@ -81,12 +91,34 @@ struct EventPickerView: View {
                     ScrollView {
                         VStack(spacing: 14) {
                             ForEach(Array(events.enumerated()), id: \.element.eventId) { index, event in
-                                Button {
-                                    model.selectEvent(event.eventId)
-                                } label: {
-                                    EventCard(event: event)
+                                HStack(spacing: 10) {
+                                    Button {
+                                        model.selectEvent(event.eventId)
+                                    } label: {
+                                        EventCard(event: event)
+                                    }
+                                    .buttonStyle(PressableStyle())
+
+                                    // Separate control rather than a long-press
+                                    // or swipe: an attendant setting up in a
+                                    // hurry should not have to discover a
+                                    // gesture, and tapping the card itself
+                                    // still does the common thing (run it).
+                                    Button {
+                                        if model.loadEventForEditing(event.eventId) {
+                                            editingEvent = EditTarget(id: event.eventId)
+                                        }
+                                    } label: {
+                                        Image(systemName: "slider.horizontal.3")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Chassis.textPrimary)
+                                            .frame(width: 46, height: 46)
+                                            .background(Circle().fill(.ultraThinMaterial))
+                                            .overlay(Circle().strokeBorder(Chassis.hairline, lineWidth: 1))
+                                    }
+                                    .buttonStyle(PressableStyle())
+                                    .accessibilityLabel("Edit \(event.displayName)")
                                 }
-                                .buttonStyle(PressableStyle())
                                 .entrance(entered, delay: 0.08 + Double(index) * 0.06)
                             }
                         }
@@ -121,6 +153,11 @@ struct EventPickerView: View {
         .sheet(isPresented: $showingNewEvent, onDismiss: reload) {
             PINGate {
                 AdminView(model: model, mode: .create)
+            }
+        }
+        .sheet(item: $editingEvent, onDismiss: reload) { _ in
+            PINGate {
+                AdminView(model: model, mode: .edit)
             }
         }
     }

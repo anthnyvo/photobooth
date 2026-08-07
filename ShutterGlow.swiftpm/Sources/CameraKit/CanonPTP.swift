@@ -9,6 +9,17 @@ public enum CanonOp {
     public static let setEventMode: UInt16 = 0x9115         // param: 1 = enable event reporting
     public static let getEvent: UInt16 = 0x9116             // poll; data phase = event records
 
+    /// Takes the body's UI away from the user for the duration of a remote
+    /// operation. Canon's EDSDK calls this before capture and libgphoto2's
+    /// ptp2 camlib does the same (ptp_canon_eos_setuilock). Without it an EOS
+    /// body can consider itself under user control and refuse the actual
+    /// release with DeviceBusy (0x2019) while still happily accepting
+    /// property sets, half-presses and event polls — which is exactly the
+    /// signature observed on the EOS R, 2026-08-03, across four different
+    /// release sequences.
+    public static let setUILock: UInt16 = 0x911B
+    public static let resetUILock: UInt16 = 0x911C
+
     // Capture
     public static let remoteRelease: UInt16 = 0x910F        // simple full release (older bodies)
     public static let remoteReleaseOn: UInt16 = 0x9128      // params: (1|2, 0) — 1 = half, 2 = full
@@ -53,6 +64,15 @@ public enum CanonProp {
     /// third-party tethering — the camera also tries to write the card mid-
     /// capture, and any card hiccup surfaces as a body-halting error.
     public static let captureDestinationHost: UInt32 = 4
+    /// Write to the memory card — the body's own default, and what this app
+    /// uses. Host destination needs an object-transfer handshake we do not
+    /// implement, and the EOS R refuses to release the shutter without it.
+    ///
+    /// Restoring this on disconnect matters more than it looks: the property
+    /// persists on the camera after the USB session ends, so a body left on
+    /// Host silently writes photos nowhere — physical shutter included, at a
+    /// real event, with no warning on the camera itself.
+    public static let captureDestinationCard: UInt32 = 2
     /// 3 = manual focus. libgphoto2 checks this before deciding whether to
     /// wait for AF confirmation at all — worth knowing which mode the body
     /// is actually in during capture debugging, not just what a switch

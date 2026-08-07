@@ -52,6 +52,7 @@ public enum PTPIPError: Error {
     case malformedPacket(String)
     case unexpectedPacketType(UInt32)
     case timeout(String)
+    case reentrancy(String)
 }
 
 public enum PTPIPCodec {

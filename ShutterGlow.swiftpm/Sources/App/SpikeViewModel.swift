@@ -156,6 +156,46 @@ final class SpikeViewModel: ObservableObject {
         }
     }
 
+    /// T3-bis — the test Phase 0 should have run before concluding that iOS
+    /// cannot do USB live view.
+    ///
+    /// ImageCaptureCore's passthrough completion returns TWO data blobs and
+    /// ICCTransport only ever read the second, discarding the first with `_`.
+    /// The recorded Phase 0 symptom — "a clean 0x2001 response with a 0-byte
+    /// payload" — is precisely what the second blob looks like when the data
+    /// phase came back in the first. Cascable ships USB live view on iPadOS
+    /// for Canon EOS, so the platform allows this; run this and let the
+    /// hardware say which parameter holds the JPEG.
+    ///
+    /// Run it with live view already attempted (the spike does that
+    /// automatically on ready), so EVFMode/EVFOutputDevice are set — otherwise
+    /// the camera has no viewfinder data to hand over and a null result proves
+    /// nothing.
+    func runViewFinderDiagnostic() {
+        guard let transport else {
+            log("!! no transport — connect first")
+            return
+        }
+        Task {
+            log("--- passthrough shape diagnostic: GetViewFinderData (0x9153) ---")
+            do {
+                // Same parameters EOS Utility uses; see CanonPTP.swift.
+                let result = try await transport.send(
+                    code: CanonOp.getViewFinderData,
+                    parameters: [0x0020_0000, 0, 0],
+                    outData: nil)
+
+                log(PassthroughDiagnostic.describe("param 1 (was discarded)", result.rawFirstParam))
+                log(PassthroughDiagnostic.describe("param 2 (what we read today)", result.rawInbound))
+                log(PassthroughDiagnostic.verdict(firstParam: result.rawFirstParam,
+                                                  secondParam: result.rawInbound))
+            } catch {
+                log("!! diagnostic send failed: \(error)")
+            }
+            log("--- end diagnostic ---")
+        }
+    }
+
     func exportLog() -> String {
         logLines.joined(separator: "\n")
     }

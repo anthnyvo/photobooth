@@ -168,15 +168,48 @@ public actor PTPIPTransport: PTPTransport {
 
     private var pendingObjectAdded: (handle: UInt32, at: Date)?
 
-    public func disconnect() {
+    /// Awaits both sockets actually reaching `.cancelled`, unlike a bare
+    /// `.cancel()` fire-and-forget — cancellation is asynchronous, and a fast
+    /// reconnect that opens a new PTPIPTransport against the same host before
+    /// the old sockets finish tearing down is the same class of race
+    /// ICCTransport's USB disconnect() was fixed for: "that wait is the
+    /// difference between reconnecting and not." Each wait is bounded so a
+    /// yanked cable / dead Wi-Fi link (stateUpdateHandler never reaches
+    /// `.cancelled`) cannot hang teardown.
+    public func disconnect() async {
         objectAddedWaiter?.resume(returning: nil)
         objectAddedWaiter = nil
         eventReaderTask?.cancel()
-        commandConnection?.cancel()
-        eventConnection?.cancel()
+
+        if let commandConnection { await Self.cancelAndAwait(commandConnection) }
+        if let eventConnection { await Self.cancelAndAwait(eventConnection) }
+
         commandConnection = nil
         eventConnection = nil
         emit(.deviceRemoved)
+    }
+
+    private static func cancelAndAwait(_ connection: NWConnection) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let lock = NSLock()
+            var resumed = false
+            func finish() {
+                lock.lock()
+                let already = resumed
+                resumed = true
+                lock.unlock()
+                guard !already else { return }
+                continuation.resume()
+            }
+            connection.stateUpdateHandler = { state in
+                if case .cancelled = state { finish() }
+            }
+            connection.cancel()
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                finish()
+            }
+        }
     }
 
     // MARK: - PTPTransport
@@ -268,7 +301,14 @@ public actor PTPIPTransport: PTPTransport {
     private func enterExclusive(_ context: String) async throws {
         if let busyContext {
             log("!!! REENTRANCY DETECTED: '\(context)' started while '\(busyContext)' was still in flight")
-            preconditionFailure("PTPIPTransport network section entered concurrently: '\(context)' vs '\(busyContext)'")
+            // Was `preconditionFailure` — a hard, unrecoverable crash mid-shot
+            // at a live paid event if this guard ever fires for real. It
+            // exists to catch a class of bug three earlier designs all hit
+            // (see comment above), not to protect against something expected
+            // to recur once shipped, so a thrown, catchable error is the
+            // right severity now: the caller drops this transaction and the
+            // booth keeps running instead of the whole app going down.
+            throw PTPIPError.reentrancy("PTPIPTransport network section entered concurrently: '\(context)' vs '\(busyContext)'")
         }
         busyContext = context
     }

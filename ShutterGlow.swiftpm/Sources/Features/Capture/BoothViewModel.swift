@@ -38,7 +38,10 @@ public final class BoothViewModel: ObservableObject {
         set { liveFeed.image = newValue }
     }
     @Published public var cameraIPText: String = "192.168.1.2"
-    @Published public private(set) var connectionMessage: String = "Enter the camera's IP and connect"
+    /// Deliberately not "enter the camera's IP" any more: Canon connects over
+    /// the cable on its own now, and an IP is only ever asked for after that
+    /// has failed, or for Sony.
+    @Published public private(set) var connectionMessage: String = "Connect the camera"
     @Published public private(set) var lastError: String?
     /// Non-nil only mid-strip-sequence, so CaptureView can show "Shot 2 of 3"
     /// — nil (and ignored) for a normal single-shot capture.
@@ -80,7 +83,38 @@ public final class BoothViewModel: ObservableObject {
         didSet { selectedBrand.save() }
     }
 
-    private var transport: PTPIPTransport?
+    /// USB (ICCTransport) or Wi-Fi (PTPIPTransport), chosen at connect time by
+    /// whether a camera is actually on the cable — see probeUSBThenFallBack.
+    private var transport: (any PTPTransport)?
+
+    /// True once ICDeviceBrowser has seen a camera on USB during a connect
+    /// attempt. Drives the USB-or-Wi-Fi decision, and the IP field's
+    /// visibility: an operator on a cable should never be shown an IP box.
+    @Published public private(set) var wifiFallbackVisible = false
+    private var usbCameraSeen = false
+
+    /// True while looking for a body on the cable. The connect screen shows a
+    /// searching state for this, rather than opening on an IP field the
+    /// operator probably does not need — most of the time a cable is plugged
+    /// in and no address is ever required.
+    @Published public private(set) var isProbingUSB = false
+
+    /// Set when a connected body cannot do everything the booth expects, e.g.
+    /// no live view over USB. Shown on the connect screen, because finding out
+    /// mid-event is worse.
+    @Published public private(set) var cameraCapabilityNote: String?
+
+    /// Whether to show the camera IP field at all.
+    ///
+    /// Only ever after the cable has been checked and come back empty. USB
+    /// Webcam is a cable path and never needs one; Sony's legacy HTTP client
+    /// and Canon's Wi-Fi transport both do. Putting a network field in front
+    /// of an operator whose camera is already plugged in just invites them to
+    /// fill it in when nothing needs it.
+    public var showsIPField: Bool {
+        guard wifiFallbackVisible else { return false }
+        return selectedBrand != .usbWebcam
+    }
     private var camera: (any TetheredCamera)?
     private var liveViewConsumer: Task<Void, Never>?
     private var eventConsumer: Task<Void, Never>?
@@ -194,13 +228,74 @@ public final class BoothViewModel: ObservableObject {
         step = .connecting
     }
 
-    /// Attendant backs out of camera-connect to switch events — tears down
-    /// any in-flight connect attempt so a stray transport doesn't linger.
+    /// Make an event active WITHOUT leaving the picker.
+    ///
+    /// Editing is reached from the event list now rather than from the camera
+    /// connect screen, and AdminView edits whichever event is active — so the
+    /// row has to become active before the sheet opens, without the
+    /// step change that `selectEvent` does.
+    @discardableResult
+    public func loadEventForEditing(_ eventId: String) -> Bool {
+        guard let selected = try? EventStorage.shared.load(eventId) else { return false }
+        EventStorage.shared.setCurrentEventId(eventId)
+        config = selected
+        return true
+    }
+
+    /// Attendant backs out of camera-connect to switch events.
+    ///
+    /// **A wired camera session is KEPT, not torn down.**
+    ///
+    /// Hardware 2026-08-03 settled this: a full, clean teardown - every PTP
+    /// restore returning 0x2001, the ICC session closed, every reference
+    /// dropped, and ICCTransport actually deallocating - still leaves the EOS R
+    /// showing its PC-connection icon and refusing to re-enumerate. Only
+    /// force-quitting the app clears it. iOS holds the USB device at the
+    /// process level regardless of what we release, so there is no teardown
+    /// sequence that fixes it.
+    ///
+    /// So stop tearing down. The camera is physically attached and is about to
+    /// be reconnected; disconnecting because someone stepped back to change
+    /// events is inherited from the Wi-Fi design, where holding a socket open
+    /// was the wasteful option. Over a cable it costs a working session and
+    /// buys nothing. Reconnecting is now instant, with no re-enumeration at
+    /// all.
+    ///
+    /// Wi-Fi still tears down: a PTP/IP socket left open really does go stale,
+    /// and the camera is not physically present to keep it honest.
     public func backToEventPicker() {
-        eventConsumer?.cancel()
-        eventConsumer = nil
         liveViewConsumer?.cancel()
         liveViewConsumer = nil
+
+        if let usb = transport as? ICCTransport, usb.hasDevice {
+            DiagnosticLog.shared.log(.camera, "keeping USB session alive across event switch")
+            // Cancelling the reader above stops frames reaching the UI but
+            // NOT the driver's poll loop, which keeps asking the body for
+            // frames at full rate into a stream with no consumer. Left
+            // running it floods the transport's single serial worker for as
+            // long as the operator is away, and the reconnect's first
+            // command queues behind all of it. See EOSCamera.pauseLiveView.
+            if let camera {
+                Task { await camera.pauseLiveView() }
+            }
+            liveViewImage = nil
+            cameraBatteryLevel = nil
+            lastError = nil
+            connectionMessage = "Camera connected"
+            // Re-armed here too, not just on the teardown path below. Without
+            // it the next visit to the connect screen was a dead end on
+            // hardware: autoConnectIfPossible bailed on the stale flag, the
+            // screen showed this "Camera connected" text with no live view
+            // behind it, and both the Connect and retry buttons are hidden
+            // while wifiFallbackVisible is false - so there was nothing left
+            // to tap. Only Event Setup or a force-quit got out.
+            autoConnectAttempted = false
+            step = .eventPicker
+            return
+        }
+
+        eventConsumer?.cancel()
+        eventConsumer = nil
         // Disconnect the camera itself, not just the transport. Nilling the
         // camera without disconnecting leaked a live AVCaptureSession on the
         // USB path — it kept running and holding the one external camera, so
@@ -210,14 +305,23 @@ public final class BoothViewModel: ObservableObject {
         let staleTransport = transport
         camera = nil
         transport = nil
-        Task {
+        // Held, not fired and forgotten. Backing out and immediately picking
+        // an event used to start a fresh browser while these restores were
+        // still in flight, and a Canon body whose exit sequence is interrupted
+        // stays in PC mode — the laptop icon on its screen, refusing to
+        // reconnect until power-cycled. connectCamera waits on this.
+        teardownTask = Task {
             await staleCamera?.disconnect()
             await staleTransport?.disconnect()
         }
         liveViewImage = nil
         cameraBatteryLevel = nil
         lastError = nil
-        connectionMessage = "Enter the camera's IP and connect"
+        // Re-arm the automatic USB attempt: backing out and coming in again is
+        // exactly what an operator does after plugging the cable in.
+        autoConnectAttempted = false
+        wifiFallbackVisible = false
+        connectionMessage = "Connect the camera"
         step = .eventPicker
     }
 
@@ -230,8 +334,78 @@ public final class BoothViewModel: ObservableObject {
     /// impatient double-tap instead of a stale session.
     private var connectInFlight = false
 
+    /// Teardown started by backToEventPicker. connectCamera awaits it, so a
+    /// new session can never open on top of a camera still being handed back.
+    private var teardownTask: Task<Void, Never>?
+
+    /// Has an automatic USB attempt already run for this visit to the connect
+    /// screen. Reset by backToEventPicker so a later visit tries again, but
+    /// not on every SwiftUI re-render of the same screen.
+    private var autoConnectAttempted = false
+
+    /// Try the camera on the cable the moment the connect screen appears, so
+    /// the normal setup is "plug it in" with nothing to tap.
+    ///
+    /// Only for Canon. Sony is Wi-Fi-only and needs an address typed first,
+    /// and USB Webcam has its own explicit brand selection — auto-grabbing a
+    /// UVC device there would fight with that choice.
+    ///
+    /// If nothing is on the cable this falls through to the Wi-Fi path exactly
+    /// as a manual tap would, revealing the IP field.
+    public func autoConnectIfPossible() {
+        guard !connectInFlight else { return }
+        // A wired session kept alive across an event switch has to come back
+        // through here, and it fails the `camera == nil` guard below by
+        // definition - the whole point is that the camera object survived.
+        // connectCamera's reuse fast path is what restarts live view on it;
+        // nothing else calls that path, so without this the kept-alive
+        // session was unreachable from the UI.
+        if let usb = transport as? ICCTransport, usb.hasDevice, camera != nil {
+            connectCamera()
+            return
+        }
+        guard !autoConnectAttempted, camera == nil else { return }
+        // No brand gate. The probe asks the hardware what is attached rather
+        // than trusting a picker the operator may never have touched, and a
+        // body plugged in over USB should just work whoever made it.
+        autoConnectAttempted = true
+        connectCamera()
+    }
+
+    /// Run the cable search again after it came back empty.
+    ///
+    /// The usual reason it failed is that the camera was not plugged in, or
+    /// was asleep, when the screen opened — both fixed in five seconds at the
+    /// booth. Without this the only route back is out to the event picker and
+    /// in again, which is not a thing an attendant would guess at.
+    public func retryCameraSearch() {
+        wifiFallbackVisible = false
+        cameraCapabilityNote = nil
+        lastError = nil
+        connectCamera()
+    }
+
     public func connectCamera() {
         guard !connectInFlight else { return }
+
+        // A wired session kept alive across an event switch is reused as-is.
+        // Re-probing would mean tearing this one down first, and a torn-down
+        // USB session cannot be re-established without force-quitting the app
+        // (see backToEventPicker). So the fast path is also the only path that
+        // works.
+        if let usb = transport as? ICCTransport, usb.hasDevice, let existing = camera {
+            DiagnosticLog.shared.log(.camera, "reusing live USB session")
+            connectionMessage = "Camera ready — starting live view…"
+            wifiFallbackVisible = false
+            isProbingUSB = false
+            connectInFlight = true
+            Task { [weak self] in
+                await self?.resumeLiveView(on: existing)
+                self?.connectInFlight = false
+            }
+            return
+        }
+
         connectInFlight = true
         lastError = nil
         connectionMessage = "Connecting to \(cameraIPText)…"
@@ -256,10 +430,41 @@ public final class BoothViewModel: ObservableObject {
         let brand = selectedBrand
         let host = cameraIPText
         Task { [weak self] in
+            // Any teardown still running from backing out has to finish first.
+            // Opening a session on a camera mid-handback is what leaves an EOS
+            // stuck showing the PC icon.
+            await self?.teardownTask?.value
+            await self?.clearTeardownTask()
+
             await staleCamera?.disconnect()
             await staleTransport?.disconnect()
+
+            // Canon bodies need a beat between a closed session and a new
+            // enumeration; going straight back in is the other way to end up
+            // with a device that never re-reports.
+            try? await Task.sleep(nanoseconds: 600_000_000)
+
             self?.bringUpCamera(brand: brand, host: host)
             self?.connectInFlight = false
+        }
+    }
+
+    private func clearTeardownTask() {
+        teardownTask = nil
+    }
+
+    /// Route the camera driver's own log into the on-device diagnostic log.
+    ///
+    /// Only the spike screen ever did this, so on the booth path every [EOS]
+    /// line — the whole connect sequence, every property set, and all of
+    /// teardown — went nowhere. Three attempts at the camera-left-in-PC-mode
+    /// bug were made without being able to see any of it.
+    private func wireCameraLogging(_ camera: any TetheredCamera) {
+        guard let eos = camera as? EOSCamera else { return }
+        Task {
+            await eos.setLogSink { line in
+                DiagnosticLog.shared.log(.camera, line)
+            }
         }
     }
 
@@ -268,6 +473,86 @@ public final class BoothViewModel: ObservableObject {
     /// enforced by a single await chain rather than hoped for across detached
     /// Tasks.
     private func bringUpCamera(brand: CameraBrand, host: String) {
+        // Look at the cable before consulting the brand picker. Whatever is
+        // plugged in is ground truth; the picker is a fallback for when
+        // nothing is, or for Sony's Wi-Fi HTTP path.
+        Task { [weak self] in await self?.probeUSBThenFallBack(brand: brand, host: host) }
+    }
+
+    /// Cable first, brand picker second.
+    ///
+    /// Two different frameworks have to be asked, because a body's USB mode
+    /// decides which one can even see it:
+    ///
+    /// - **PTP** (`ICDeviceBrowser`) — Canon, Nikon, and Sony in PC Remote.
+    ///   Real shutter, full resolution, flash.
+    /// - **UVC** (`AVCaptureDevice.external`) — anything in webcam mode,
+    ///   including Sony in USB Streaming. Live view, but "capture" is a
+    ///   grabbed video frame.
+    ///
+    /// A camera is in one mode or the other, never both — all three vendors
+    /// make USB mode a one-of-N menu setting. PTP is preferred when both
+    /// somehow appear, since it is the higher-quality path.
+    private func probeUSBThenFallBack(brand: CameraBrand, host: String) async {
+        usbCameraSeen = false
+        wifiFallbackVisible = false
+        cameraCapabilityNote = nil
+        isProbingUSB = true
+        defer { isProbingUSB = false }
+        connectionMessage = "Looking for a camera…"
+
+        let usb = ICCTransport()
+        usb.setLogSink { line in DiagnosticLog.shared.log(.camera, line) }
+        transport = usb
+        eventConsumer = Task { [weak self] in
+            for await event in usb.events {
+                await self?.handle(event)
+            }
+        }
+        usb.start()
+
+        // 5s rather than 3s. A cold start enumerates fast, but a RECONNECT —
+        // backing out of the booth and returning — has just torn a session
+        // down, and ImageCaptureCore is slower to re-report a device it was
+        // recently holding. Three seconds was short enough to miss it, which
+        // read as "it doesn't pick the camera up on reconnect".
+        for _ in 0..<20 {
+            // PTP body — handle(.deviceFound) has already picked its driver.
+            if usbCameraSeen { return }
+
+            // UVC body. Invisible to the browser above, so checked separately.
+            if UVCWebcamCamera.isExternalCameraAttached {
+                eventConsumer?.cancel()
+                eventConsumer = nil
+                usb.stop()
+                transport = nil
+
+                let name = UVCWebcamCamera.externalCameraName ?? "camera"
+                camera = UVCWebcamCamera()
+                cameraCapabilityNote = TetheredCameraFactory.Capability.videoFrameCapture.operatorNote
+                DiagnosticLog.shared.log(.camera, "USB webcam: \(name)")
+                connectionMessage = "Found \(name) — starting live view…"
+                await startRemoteModeAndLiveView()
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+
+        // Nothing on the cable. Drop the browser before anything else opens a
+        // connection — leaving it scanning would have two transports live and
+        // a stale ICCTransport still holding its delegate callbacks.
+        eventConsumer?.cancel()
+        eventConsumer = nil
+        usb.stop()
+        camera = nil
+        transport = nil
+        wifiFallbackVisible = true
+
+        bringUpFromBrandPicker(brand: brand, host: host)
+    }
+
+    private func bringUpFromBrandPicker(brand: CameraBrand, host: String) {
         // Sony speaks HTTP (Camera Remote API), not PTP/IP — no transport
         // handshake to wait on, so it jumps straight to the shared
         // remote-mode + live-view bring-up.
@@ -296,10 +581,18 @@ public final class BoothViewModel: ObservableObject {
             return
         }
 
+        Task { [weak self] in await self?.bringUpCanonOverWiFi(host: host) }
+    }
+    /// Canon over Wi-Fi PTP/IP. Only reached when nothing was found on the
+    /// cable — USB is preferred and already tried, being faster on both live
+    /// view (30-36 fps vs 14) and capture (1.94s vs 2.79s) and needing no AP,
+    /// pairing or IP address at all. See docs/PHASE0.md.
+    private func bringUpCanonOverWiFi(host: String) async {
         let wifiTransport = PTPIPTransport(host: host)
         transport = wifiTransport
-        let cam = EOSCamera(transport: wifiTransport)
-        camera = cam
+        let eos = EOSCamera(transport: wifiTransport)
+        camera = eos
+        wireCameraLogging(eos)
 
         eventConsumer = Task { [weak self] in
             for await event in wifiTransport.events {
@@ -307,20 +600,30 @@ public final class BoothViewModel: ObservableObject {
             }
         }
 
-        Task {
-            do {
-                try await wifiTransport.connect()
-            } catch {
-                self.lastError = "Connect failed: \(error)"
-                DiagnosticLog.shared.log(.camera, "connect failed: \(error)")
-                self.connectionMessage = "Connect failed — check the camera is in Remote control (EOS Utility) mode and the IP is correct"
-            }
+        do {
+            try await wifiTransport.connect()
+        } catch {
+            lastError = "Connect failed: \(error)"
+            DiagnosticLog.shared.log(.camera, "connect failed: \(error)")
+            connectionMessage = "No camera found on the cable, and the Wi-Fi connection failed. Either plug the camera in with a USB-C cable, or check it is in Remote control (EOS Utility) mode and the IP is right."
         }
     }
 
     private func handle(_ event: TransportEvent) async {
         switch event {
         case .deviceFound(let name):
+            usbCameraSeen = true
+            // Build the protocol actor HERE, not back in the probe loop.
+            // `.ready` can follow `.deviceFound` faster than that loop's 250ms
+            // tick on a near-empty card, and startRemoteModeAndLiveView needs
+            // `camera` already set when it does.
+            if let usb = transport as? ICCTransport, camera == nil {
+                let match = TetheredCameraFactory.make(deviceName: usb.deviceName, transport: usb)
+                camera = match.camera
+                wireCameraLogging(match.camera)
+                cameraCapabilityNote = match.capability.operatorNote
+                DiagnosticLog.shared.log(.camera, "USB camera: \(match.describedAs) (\(match.capability))")
+            }
             connectionMessage = "Found \(name) — starting session…"
         case .ready:
             connectionMessage = "Camera ready — starting live view…"
@@ -337,6 +640,62 @@ public final class BoothViewModel: ObservableObject {
         }
     }
 
+    /// Restart just the frame stream on a session that is already in remote
+    /// mode, for a wired camera kept alive across an event switch.
+    ///
+    /// Deliberately does NOT re-run enterRemoteMode: the body is already there,
+    /// and re-entering would re-send SetRemoteMode and the capture-destination
+    /// property for no reason on a session that never dropped.
+    private func resumeLiveView(on camera: any TetheredCamera) async {
+        do {
+            DiagnosticLog.shared.log(.camera, "resuming live view on kept-alive session")
+            let frames = try await camera.resumeLiveView()
+            consumeLiveView(frames)
+            DiagnosticLog.shared.log(.camera, "live view resumed, entering attract")
+            step = .attract
+        } catch {
+            lastError = "Live view failed: \(error)"
+            DiagnosticLog.shared.log(.camera, "live view resume failed: \(error)")
+            connectionMessage = "Camera connected, but live view did not start"
+            // Same dead end as the kept-alive session had: while this stays
+            // false the connect screen has no Connect and no retry button, so
+            // a failed resume left the attendant with nothing to tap. It does
+            // reveal the brand picker and IP field, which is noise on a cable
+            // that is plainly working - but a misleading control beats no
+            // control, and retryCameraSearch re-probes USB either way.
+            wifiFallbackVisible = true
+        }
+    }
+
+    /// Drain a live-view stream into the feed. Shared by first connect and by
+    /// resuming a kept-alive wired session, so the two cannot drift.
+    ///
+    /// Detached on purpose: a plain Task{} here inherits the main actor, which
+    /// put every frame's JPEG decode on the main thread — and UIImage defers
+    /// the actual bitmap decompress to first render, landing that on the main
+    /// thread too. Decoding AND rasterizing (preparingForDisplay) off-main
+    /// turns each frame's main-thread cost into a pointer swap + composited
+    /// blit, which is both the smoothness fix and an effective frame-rate
+    /// raise: the stream buffers only the newest frame, so a slow consumer was
+    /// silently dropping frames the camera had already delivered.
+    private func consumeLiveView(_ frames: AsyncStream<Data>) {
+        liveViewConsumer?.cancel()
+        liveViewConsumer = Task.detached(priority: .userInitiated) { [weak self] in
+            for await jpeg in frames {
+                guard let self else { return }
+                guard let raw = UIImage(data: jpeg) else { continue }
+                let image = raw.preparingForDisplay() ?? raw
+                await MainActor.run {
+                    self.liveFeed.image = image
+                    self.latestLiveFrameJPEG = jpeg
+                    if self.isRecordingFrames {
+                        self.recordedFrames.append(jpeg)
+                    }
+                }
+            }
+        }
+    }
+
     private func startRemoteModeAndLiveView() async {
         guard let camera else { return }
         do {
@@ -345,30 +704,7 @@ public final class BoothViewModel: ObservableObject {
                 Task { @MainActor in self?.cameraBatteryLevel = level }
             }
             let frames = try await camera.startLiveView()
-            liveViewConsumer?.cancel()
-            // Detached on purpose: a plain Task{} here inherits the main
-            // actor, which put every frame's JPEG decode on the main thread
-            // — and UIImage defers the actual bitmap decompress to first
-            // render, landing that on the main thread too. Decoding AND
-            // rasterizing (preparingForDisplay) off-main turns each frame's
-            // main-thread cost into a pointer swap + composited blit, which
-            // is both the smoothness fix and an effective frame-rate raise:
-            // the stream buffers only the newest frame, so a slow consumer
-            // was silently dropping frames the camera had already delivered.
-            liveViewConsumer = Task.detached(priority: .userInitiated) { [weak self] in
-                for await jpeg in frames {
-                    guard let self else { return }
-                    guard let raw = UIImage(data: jpeg) else { continue }
-                    let image = raw.preparingForDisplay() ?? raw
-                    await MainActor.run {
-                        self.liveFeed.image = image
-                        self.latestLiveFrameJPEG = jpeg
-                        if self.isRecordingFrames {
-                            self.recordedFrames.append(jpeg)
-                        }
-                    }
-                }
-            }
+            consumeLiveView(frames)
             step = .attract
         } catch {
             lastError = "Remote mode / live view failed: \(error)"
@@ -617,7 +953,12 @@ public final class BoothViewModel: ObservableObject {
             lastError = "Capture failed: connection timed out"
             DiagnosticLog.shared.log(.capture, "capture timed out")
             step = .attract
-            await transport?.disconnect()
+            // Deliberately NOT disconnecting the transport here. Doing so
+            // closed the session first, and connectCamera's own teardown then
+            // tried to restore capture destination, EVF and remote mode down a
+            // transport that was already dead — so the restores silently
+            // failed and the body could be left in PC mode. connectCamera
+            // tears both down in the right order.
             step = .connecting
             connectionMessage = "Connection lost — reconnecting…"
             try? await Task.sleep(nanoseconds: 1_000_000_000)

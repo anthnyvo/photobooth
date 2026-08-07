@@ -17,9 +17,44 @@ public enum TransportEvent: Sendable {
 public struct PTPTransactionResult: Sendable {
     public let payload: Data
     public let response: PTPContainer?
-    /// Raw blob exactly as ImageCaptureCore returned it — Phase 0 needs this
-    /// to learn the real shape of passthrough replies on the EOS R.
+    /// The response-container blob as the transport received it.
     public let rawInbound: Data
+    /// ImageCaptureCore's passthrough completion hands back TWO blobs, and
+    /// the FIRST is the device-to-host data phase. Kept separately because
+    /// PassthroughDiagnostic reports on it; `payload` is normally what you
+    /// want. Empty on PTPIPTransport, which speaks the wire protocol
+    /// directly and has no such split.
+    public var rawFirstParam: Data = Data()
+
+    /// Assembles a result from ImageCaptureCore's two-blob reply.
+    ///
+    /// This is the whole fix for the bug that cost three weeks and an entire
+    /// Wi-Fi transport. `requestSendPTPCommand`'s completion splits the reply:
+    /// the FIRST blob is the data phase, the SECOND is the response container.
+    /// The transport read only the second, so `payload` came back empty for
+    /// every command that actually returns data — live view above all, but
+    /// also GetEvent and property reads. A bare 12-to-20-byte `0x2001` was
+    /// then misread as proof that iOS never surfaces the data phase at all.
+    ///
+    /// Hardware-verified on the EOS R, 2026-08-01: param 1 carried a
+    /// 184KB live-view JPEG (structured Canon framing, no PTP header of its
+    /// own), param 2 was a 20-byte response container. See PHASE0.md.
+    ///
+    /// A pure function so it can be tested without an ICCameraDevice.
+    public static func from(dataPhase: Data, responseBlob: Data) -> PTPTransactionResult {
+        // The response always comes from blob 2. splitInboundBlob also copes
+        // with a transport that appends the response to its data rather than
+        // splitting, which is why the fallback below is not dead code.
+        let (fallbackPayload, response) = PTPContainer.splitInboundBlob(responseBlob)
+        // Prefer the real data phase. Falling back to the old single-blob
+        // split when it is empty keeps commands that return no data (capture,
+        // SetRemoteMode) behaving exactly as they already did — those were
+        // never broken, and this fix must not "repair" them into something
+        // different.
+        let payload = dataPhase.isEmpty ? fallbackPayload : dataPhase
+        return PTPTransactionResult(payload: payload, response: response,
+                                    rawInbound: responseBlob, rawFirstParam: dataPhase)
+    }
 }
 
 public enum TransportError: Error {
@@ -31,10 +66,16 @@ public enum TransportError: Error {
 }
 
 /// Wraps ICDeviceBrowser/ICCameraDevice. Sole ImageCaptureCore touchpoint in
-/// the codebase. USB live view's data phase turned out not to be retrievable
-/// through this API on iOS (Phase 0 finding) — PTPIPTransport is the Wi-Fi
-/// sibling that exists because of that, conforming to the same PTPTransport
-/// protocol so EOSCamera's logic is unchanged either way.
+/// the codebase. PTPIPTransport is the Wi-Fi sibling, conforming to the same
+/// PTPTransport protocol so EOSCamera's logic is unchanged either way.
+///
+/// Phase 0 concluded USB live view's data phase was unreachable on iOS and
+/// built the entire Wi-Fi transport because of it. **That was wrong, and this
+/// class was where it was wrong**: the passthrough completion returns two
+/// blobs, the data phase is in the first, and this code read only the second
+/// and discarded the first with `_`. Fixed 2026-08-01 after a hardware test
+/// found a 184KB live-view JPEG in the discarded parameter. See
+/// `PTPTransactionResult.from` and docs/PHASE0.md.
 public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
 
     private let browser = ICDeviceBrowser()
@@ -62,9 +103,44 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
     private var currentWaiter: (continuation: CheckedContinuation<ICCameraFile, Error>, generation: Int)?
     private var waiterGeneration = 0
 
+    /// Direct log sink, separate from the `events` stream.
+    ///
+    /// Teardown logs used to go out as `.log` events, and BoothViewModel
+    /// cancels its event consumer before tearing down — so the entire ICC
+    /// half of teardown was emitted into a stream nobody was reading. Half
+    /// the picture was missing while chasing the PC-mode lockup.
+    private var directLog: (@Sendable (String) -> Void)?
+
+    public func setLogSink(_ sink: @escaping @Sendable (String) -> Void) {
+        directLog = sink
+    }
+
+    private func note(_ message: String) {
+        directLog?("[ICC] \(message)")
+        emit(.log(message))
+    }
+
+    /// How long a single PTP transaction may go unanswered before `send()`
+    /// gives up on it. See the deadline race in `send()` for why one exists
+    /// at all; raise this rather than adding a second timeout anywhere else.
+    ///
+    /// 20s. The only failure mode this guards is a completion that never
+    /// arrives, which is unrecoverable and should be vanishingly rare, so
+    /// the number wants to sit far above any legitimate slow transaction. A
+    /// capture that would have succeeded must never trip it.
+    static let transactionDeadlineNanoseconds: UInt64 = 20_000_000_000
+
     public override init() {
         super.init()
         browser.delegate = self
+    }
+
+    deinit {
+        // The camera stays in PC mode until the app releases the USB device,
+        // and iOS only does that when ImageCaptureCore's objects go away —
+        // force-quitting the app clears the icon, closing the session does
+        // not. So whether this actually runs is the whole question.
+        directLog?("[ICC] transport deallocated — USB device released")
     }
 
     public func start() {
@@ -74,10 +150,85 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
         emit(.log("ICDeviceBrowser started"))
     }
 
+    /// Synchronous sibling of `disconnect()` for call sites that need to
+    /// move on immediately (no camera was ever confirmed on the cable, so
+    /// there's nothing worth awaiting a close confirmation for) — but still
+    /// drops every reference ImageCaptureCore could hold, matching
+    /// disconnect()'s cleanup. Previously skipped the delegate-nilling and
+    /// continuation-finishing disconnect() does, which was harmless only
+    /// because every existing call site drops this whole object right after;
+    /// consolidated so a future call site can't reintroduce that leak.
     public func stop() {
         camera?.requestCloseSession()
+        camera?.delegate = nil
+        browser.delegate = nil
         browser.stop()
+        camera = nil
+        isReady = false
+        eventContinuation?.finish()
     }
+
+    /// PTPTransport conformance — and, unlike `stop()`, it WAITS for the
+    /// session to actually close.
+    ///
+    /// That wait is the difference between reconnecting and not.
+    /// `requestCloseSession` is asynchronous: fire it and immediately start a
+    /// fresh `ICDeviceBrowser` and the new browser comes up while the old
+    /// session is still tearing down, so the device is never re-reported and
+    /// the camera appears to have vanished. That is exactly what backing out
+    /// of the booth and reconnecting used to do.
+    ///
+    /// Timeout-guarded because disconnect also runs on the yanked-cable path,
+    /// where the close callback will never arrive.
+    public func disconnect() async {
+        guard let camera else {
+            browser.stop()
+            return
+        }
+
+        note("teardown: requesting ICC session close")
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            closeWaiter = continuation
+            camera.requestCloseSession()
+
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await self?.resumeCloseWaiter(timedOut: true)
+            }
+        }
+
+        browser.stop()
+        // Drop every reference ImageCaptureCore could still be holding.
+        // Closing the session is not what frees the USB device; releasing the
+        // objects is, and anything still pointing at this transport keeps the
+        // camera showing its PC icon until the app dies.
+        camera.delegate = nil
+        browser.delegate = nil
+        self.camera = nil
+        isReady = false
+        eventContinuation?.finish()
+        note("teardown: ICC session closed, browser stopped, references dropped")
+    }
+
+    private var closeWaiter: CheckedContinuation<Void, Never>?
+
+    @MainActor
+    private func resumeCloseWaiter(timedOut: Bool) {
+        guard let waiter = closeWaiter else { return }
+        closeWaiter = nil
+        if timedOut { note("teardown: session close TIMED OUT") }
+        waiter.resume()
+    }
+
+    /// Whether a camera has been seen on the cable. Lets a caller probe for a
+    /// USB body and fall back to Wi-Fi when there isn't one, without having to
+    /// consume the event stream (which has a single consumer) to find out.
+    public var hasDevice: Bool { camera != nil }
+
+    /// Name ImageCaptureCore reports for the attached body, e.g. "Canon EOS R".
+    /// Used to pick which protocol actor to drive it with — see
+    /// `TetheredCameraFactory`.
+    public private(set) var deviceName: String?
 
     // MARK: - PTP passthrough
 
@@ -94,16 +245,62 @@ public final class ICCTransport: NSObject, PTPTransport, @unchecked Sendable {
                                          parameters: parameters)
             let command = container.encoded()
 
+            // ImageCaptureCore exposes no way to cancel a pending
+            // requestSendPTPCommand, unlike PTPIPTransport's NWConnection
+            // reads, where `.cancel()` forces the receive callback to fire.
+            // Left unguarded, one dropped completion (cable glitch, camera
+            // hiccup) wedges this SerialGate's single worker forever — every
+            // later send(), including this transport's own disconnect(),
+            // queues behind it and never runs. The outer `withTimeout`
+            // wrapping capturePhoto() can't rescue it either: cancelling
+            // this task does nothing observable to a bare continuation with
+            // no cancellation handler. A deadline race here, independent of
+            // Task cancellation, is the only way to free the worker.
+            //
+            // `resumed`, guarded by a lock, exists because the real
+            // completion can still arrive after the deadline fires — the
+            // continuation must be resumed exactly once, or the second
+            // attempt crashes the process.
+            //
+            // The deadline is deliberately generous. It exists to break a
+            // permanent wedge, not to enforce a latency budget, so the cost
+            // of setting it too low (failing a capture the camera would have
+            // completed a moment later) is worse than the cost of setting it
+            // too high (a few more seconds of frozen UI in a case that
+            // should never happen). A full-res capture round trip measured
+            // 1.94s on the EOS R — but that was one shot in a quiet room,
+            // not booth pace with the card writing and the buffer full.
+            let lock = NSLock()
+            var resumed = false
+            func resumeOnce(_ continuation: CheckedContinuation<PTPTransactionResult, Error>,
+                            _ result: Result<PTPTransactionResult, Error>) {
+                lock.lock()
+                let already = resumed
+                resumed = true
+                lock.unlock()
+                guard !already else { return }
+                continuation.resume(with: result)
+            }
+
             return try await withCheckedThrowingContinuation { continuation in
-                camera.requestSendPTPCommand(command, outData: outData) { _, inData, error in
+                camera.requestSendPTPCommand(command, outData: outData) { dataPhase, responseBlob, error in
                     if let error {
-                        continuation.resume(throwing: TransportError.sendFailed(underlying: error))
+                        resumeOnce(continuation, .failure(TransportError.sendFailed(underlying: error)))
                         return
                     }
-                    let blob = inData
-                    let (payload, response) = PTPContainer.splitInboundBlob(blob)
-                    continuation.resume(returning: PTPTransactionResult(
-                        payload: payload, response: response, rawInbound: blob))
+                    // `as Data?` rather than a plain `??`: ImageCaptureCore's
+                    // block has no nullability annotations, so these import as
+                    // Data, Data? or Data! depending on SDK, and this form
+                    // compiles (and stays nil-safe) in all three.
+                    resumeOnce(continuation, .success(PTPTransactionResult.from(
+                        dataPhase: (dataPhase as Data?) ?? Data(),
+                        responseBlob: (responseBlob as Data?) ?? Data())))
+                }
+
+                Task {
+                    try? await Task.sleep(nanoseconds: Self.transactionDeadlineNanoseconds)
+                    resumeOnce(continuation, .failure(
+                        TransportError.timeout("PTP command 0x\(String(code, radix: 16)) never completed")))
                 }
             }
         }
@@ -178,6 +375,7 @@ extension ICCTransport: ICDeviceBrowserDelegate {
         guard let cam = device as? ICCameraDevice else { return }
         camera = cam
         cam.delegate = self
+        deviceName = device.name
         emit(.deviceFound(name: device.name ?? "unknown camera"))
         cam.requestOpenSession()
     }
@@ -228,6 +426,9 @@ extension ICCTransport: ICCameraDeviceDelegate {
     public func device(_ device: ICDevice, didCloseSessionWithError error: Error?) {
         isReady = false
         emit(.log("session closed \(error.map { "with error: \($0)" } ?? "cleanly")"))
+        // Releases disconnect()'s wait. Without this the teardown either
+        // blocks for its full timeout every time, or races a new browser.
+        Task { @MainActor [weak self] in self?.resumeCloseWaiter(timedOut: false) }
     }
 
     public func didRemove(_ device: ICDevice) {

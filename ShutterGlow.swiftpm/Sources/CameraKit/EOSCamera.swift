@@ -72,20 +72,27 @@ public actor EOSCamera {
             try await expectOK("SetEventMode",
                 await transport.send(code: CanonOp.setEventMode, parameters: [1]))
             startEventLoop()
-            // TEMPORARILY DISABLED for a diagnostic test: AF has been
-            // blocked camera-wide (remote AND physical shutter both) for
-            // the entire remote session on every prior build, and every
-            // theory involving EVFOutputDevice or the RemoteReleaseOn AF
-            // parameter has been ruled out on hardware. The only other
-            // thing enterRemoteMode() changes from the body's own defaults
-            // is this property (default read as 2/Card; we were forcing 4/
-            // Host). Leaving it untouched to isolate whether this is the
-            // actual variable before committing to redesigning capture
-            // retrieval around card storage.
-            // try await setProperty(CanonProp.captureDestination,
-            //                       CanonProp.captureDestinationHost,
-            //                       name: "CaptureDestination=Host")
-            log("CaptureDestination left at camera default (diagnostic test — see comment above)")
+            // Capture to the CARD, not the host.
+            //
+            // Host destination (4) is why the shutter would not fire. Hardware
+            // 2026-08-03: with Host set, every release path returned DeviceBusy
+            // — bare release, full-press alone, half+full, and with EVF torn
+            // down. With Card set, the same commands were accepted. Cascable
+            // Studio confirmed the split from the other side: it captures on
+            // this exact body and cable, and treats "PC Only / Host Only" as a
+            // separate paid mode, because host destination needs a real
+            // object-transfer handshake (RequestObjectTransfer -> GetPartialObject
+            // -> TransferComplete) that this app has never implemented. Asking
+            // the body to hand an image to a host that will not collect it is
+            // what it was refusing to do.
+            //
+            // This setting also PERSISTS on the camera after disconnect. Left
+            // on Host, the body writes photos nowhere at all — including for
+            // the physical shutter, at a real event, silently. resetDeviceState()
+            // below puts it back; see disconnect().
+            try await setProperty(CanonProp.captureDestination,
+                                  CanonProp.captureDestinationCard,
+                                  name: "CaptureDestination=Card")
             state = .connected
             log("remote mode active")
         } catch {
@@ -117,6 +124,15 @@ public actor EOSCamera {
                                 if propcode == CanonProp.focusMode || propcode == CanonProp.captureDestination {
                                     let valueBytes = record.payload.dropFirst(4).map { String(format: "%02X", $0) }.joined(separator: " ")
                                     await self.log(String(format: "prop 0x%04X = [%@]", propcode, valueBytes))
+                                }
+                                // Cached because Canon EOS has no synchronous
+                                // property read — this event is the only place
+                                // the value ever appears, and triggerShutter
+                                // needs it to say whether a refused release is
+                                // explained by One-Shot AF on a lens that
+                                // cannot focus.
+                                if propcode == CanonProp.focusMode, record.payload.count >= 8 {
+                                    await self.recordFocusMode(record.payload.readLE(UInt32.self, at: 4))
                                 }
                                 if propcode == CanonProp.batteryLevel, record.payload.count >= 8 {
                                     let value = record.payload.readLE(UInt32.self, at: 4)
@@ -236,6 +252,50 @@ public actor EOSCamera {
         }
     }
 
+    /// Suspend frame polling without touching the session or EVFOutputDevice.
+    ///
+    /// The poll loop is not self-limiting: `AsyncStream` with
+    /// `.bufferingNewest(1)` drops a yield nobody is reading rather than
+    /// applying back-pressure, so with the UI's reader cancelled this loop
+    /// carried on issuing GetViewFinderData every ~10ms into the void. For
+    /// the whole time an operator sat on the event list — minutes, easily —
+    /// the body was being asked for frames at full rate with no consumer,
+    /// and every one of those transactions occupied the transport's single
+    /// serial worker. Resuming then had to push EVFOutputDevice through that
+    /// same queue, which is the likeliest reason a reconnect sat forever on
+    /// "starting live view".
+    ///
+    /// The continuation is deliberately kept: `resumeLiveView()` finishes it
+    /// explicitly, and dropping it here would strand any reader still in
+    /// `for await` on a stream that then neither yields nor finishes.
+    public func pauseLiveView() {
+        liveViewTask?.cancel()
+        liveViewTask = nil
+        log("live view paused (session kept open)")
+    }
+
+    /// Restart frame delivery on a body that never left live-view mode.
+    ///
+    /// Does NOT re-send EVFOutputDevice or wait out the 500ms settle that
+    /// `startLiveView()` needs — the sensor has been streaming the whole
+    /// time, only our reader went away. Re-sending was not harmless: it put
+    /// a property write at the back of a queue the paused-but-still-running
+    /// poll loop had filled.
+    public func resumeLiveView() async throws -> AsyncStream<Data> {
+        // A stream can only be consumed once, and the previous reader was
+        // cancelled, so the caller needs a new one. Finish the old
+        // continuation rather than just overwriting it.
+        liveViewContinuation?.finish()
+        let (stream, continuation) = AsyncStream.makeStream(of: Data.self,
+            bufferingPolicy: .bufferingNewest(1))
+        liveViewContinuation = continuation
+        liveViewStats = LiveViewStats()
+        state = .liveView
+        startLiveViewPolling()
+        log("live view resumed on the existing session")
+        return stream
+    }
+
     public func stopLiveView() async throws {
         liveViewTask?.cancel()
         liveViewTask = nil
@@ -276,6 +336,16 @@ public actor EOSCamera {
     /// the focus-confirm event, never fired even once while EVF was down).
     private(set) var isCapturePaused = false
 
+    /// Last focus mode the body reported (3 = manual). Only ever populated by
+    /// the PropValueChanged event above; there is no synchronous read.
+    private var lastFocusMode: UInt32?
+
+    private func recordFocusMode(_ mode: UInt32) { lastFocusMode = mode }
+
+    /// Object handle of the most recent capture, taken from Canon's own
+    /// ObjectAdded/RequestObjectTransfer event.
+    private var lastCapturedHandle: UInt32?
+
     /// Trigger the shutter and return the resulting full-resolution image.
     public func capturePhoto() async throws -> Data {
         eventLoopTask?.cancel()
@@ -291,100 +361,255 @@ public actor EOSCamera {
                 startEventLoop()
             }
         }
+        lastCapturedHandle = nil
         try await triggerShutter()
+
+        // Prefer Canon's own object handle over waiting for ImageCaptureCore
+        // to notice a new file. ICC's catalog is populated at session open and
+        // does not reliably re-announce a shot taken mid-session — hardware
+        // 2026-08-03: the shutter fired, ObjectAddedEx64 arrived within three
+        // seconds carrying the handle, and ICC's file-added callback never
+        // came at all inside a 15s wait. PTPIPTransport has downloaded
+        // captures this way over Wi-Fi from the start; the only reason USB
+        // could not was that the transport discarded every data phase, so
+        // GetObject returned nothing to return.
+        if let handle = lastCapturedHandle {
+            do {
+                return try await downloadObject(handle)
+            } catch {
+                log("GetObject on handle 0x\(String(handle, radix: 16)) failed (\(error)); falling back to the file catalog")
+            }
+        }
         return try await transport.nextCapturedFile(timeout: 15)
     }
 
+    /// Pull a captured image off the camera by its object handle.
+    private func downloadObject(_ handle: UInt32) async throws -> Data {
+        let info = try await transport.send(code: StandardPTPOp.getObjectInfo, parameters: [handle])
+        if info.payload.count >= 12 {
+            // Size lives at offset 8 of the ObjectInfo dataset: StorageID(4) +
+            // ObjectFormat(2) + ProtectionStatus(2) + ObjectCompressedSize(4).
+            log("object info: \(info.payload.readLE(UInt32.self, at: 8)) bytes reported")
+        }
+
+        let object = try await transport.send(code: StandardPTPOp.getObject, parameters: [handle])
+        if let code = object.response?.code, code != PTPResponseCode.ok {
+            throw EOSError.badResponse(operation: "GetObject", code: code)
+        }
+        guard !object.payload.isEmpty else {
+            throw EOSError.badResponse(operation: "GetObject (empty payload)", code: nil)
+        }
+        log("downloaded \(object.payload.count) bytes for handle 0x\(String(handle, radix: 16))")
+        return object.payload
+    }
+
+    /// Fire the shutter, and prove it fired.
+    ///
+    /// Three release paths exist in the record and they contradict each other,
+    /// so this tries each in turn and reports which one the body actually
+    /// honours. One hardware run settles a question that has otherwise cost a
+    /// build-sideload-test cycle per theory.
+    ///
+    /// The contradiction: PHASE0.md's hardware table records T4 passing at
+    /// 2.79s using bare RemoteRelease 0x910F, while the comment that used to
+    /// live here called 0x910F "a no-op, not implemented on EOS". Both cannot
+    /// be true. Rather than pick one, ask the camera.
+    ///
+    /// **A response of 0x2001 OK does not mean the shutter fired.** That was
+    /// established on hardware: with CaptureDestination=Card the half+full
+    /// pair returned OK for every command and no image ever appeared. So each
+    /// method below is judged on whether an object event arrives afterwards,
+    /// not on its response code.
     private func triggerShutter() async throws {
-        // Bare 0x910F (RemoteRelease) acks OK on EOS bodies but is a no-op —
-        // it's a legacy PowerShot-era release, not implemented on EOS. EOS
-        // bodies need the half-press (AF) + full-press pair instead,
-        // matching libgphoto2's ptp2 camlib (camera_trigger_canon_eos_capture
-        // in library.c) and EOS Utility's own sequence.
-        //
-        // Releasing half-press on a failed full-press (below) is real and
-        // necessary — a leftover held half-press does make the body refuse
-        // every future full-press with DeviceBusy — but wasn't the whole
-        // story either. The actual finding: with the remote session active,
-        // AF stopped working camera-wide — even the physical shutter button
-        // couldn't focus until disconnecting. That rules out EVFOutputDevice
-        // (tried 0, 2, and 3, all identical) and points at the second
-        // RemoteReleaseOn parameter instead: per Canon's EDSDK semantics,
-        // 0 = attempt AF, 1 = skip AF (instant press). This lens is a
-        // manual-focus adapter with no AF motor — sending 0 makes the body's
-        // firmware start an AF search that can never resolve, and it gets
-        // stuck waiting forever, which is exactly what blocks every press
-        // (remote or physical) afterward, not just ours. libgphoto2's
-        // reference always sends 0 here, but its manual-focus special-case
-        // never actually needed to change this param because the bodies it
-        // was tested against still complete a (failed) AF cycle fast; this
-        // adapter apparently never resolves the cycle at all.
+        // Clear any half-press left holding from an earlier failed attempt.
+        // A stuck half-press does genuinely make the body refuse every
+        // subsequent full-press with DeviceBusy.
         _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
 
-        // param2=1 ("skip AF") on the half-press itself immediately failed
-        // busy on hardware — half-press's whole point is normally to start
-        // AF, so "half-press, don't AF" is likely a rejected/nonsensical
-        // combination. Back to 0 (request AF) here; the non-AF flag stays
-        // on the full-press below, which is where AF-confirm gating would
-        // actually matter for a lens that can never send that confirm.
-        try await expectOK("ReleaseOn(half)",
-            await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0]))
+        switch lastFocusMode {
+        case .some(3):
+            log("focus mode at capture: 3 (manual) — AF is not a factor")
+        case .some(let mode):
+            log("focus mode at capture: \(mode) (autofocus). A lens that cannot AF will refuse to release in One-Shot, whatever the release path.")
+        case nil:
+            log("focus mode at capture: not reported yet")
+        }
 
-        // From here on the half-press is ENGAGED on the body. Any throw
-        // below this point — including the full-press send() itself
-        // throwing on a network error, not just a bad response code, which
-        // the explicit release at line ~353 never covered — must still
-        // release it, or the body refuses every future press (remote or
-        // physical) with DeviceBusy until power-cycled. halfPressReleased
-        // tracks whether a path below already handled it explicitly, so
-        // this defer doesn't double-send on the normal exit.
-        var halfPressReleased = false
-        defer {
-            if !halfPressReleased {
-                let transport = self.transport
-                Task { _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1]) }
+        // Take the body's UI before attempting any release, and give it back
+        // afterwards whatever happens.
+        //
+        // This is the one thing Canon's own EDSDK and libgphoto2 both do that
+        // this code never did. It fits the 2026-08-03 evidence precisely: the
+        // body accepted property sets, half-presses and event polls, and
+        // refused only the full press, with DeviceBusy, across four unrelated
+        // release sequences, in both AF and MF, with EVF up and torn down.
+        // "Busy" was never about focus or live view — it was the body saying
+        // it is being operated by a human.
+        //
+        // Failure is logged rather than thrown: if a body does not implement
+        // the opcode the ladder below should still get its chance.
+        let lock = try? await transport.send(code: CanonOp.setUILock)
+        log("SetUILock: \(code(of: lock))")
+
+        // Released on BOTH paths, awaited. Swift cannot await inside defer, and
+        // a UI lock handed back from a detached Task can still be held when the
+        // next capture starts or when disconnect runs — leaving the body under
+        // host control with nothing driving it, which is the same family of
+        // stuck state as the PC-mode icon.
+        var attempts: [String] = []
+
+        for method in ShutterMethod.allCases {
+            let outcome = await tryRelease(method)
+            attempts.append("\(method.label): \(outcome.summary)")
+            if outcome.fired {
+                log("SHUTTER FIRED via \(method.label)")
+                log("  ladder: \(attempts.joined(separator: " | "))")
+                _ = try? await transport.send(code: CanonOp.resetUILock)
+                return
             }
         }
 
-        // FocusMode==3 means manual focus, in which case libgphoto2 never
-        // waits for AF confirmation at all — worth knowing which mode we're
-        // actually in rather than relying on what a physical switch looked
-        // like from outside. Also surfacing CaptureDestination here in case
-        // it silently reverted from Host after the initial connect-time set.
-        var sawOLCInfo = false
-        for _ in 0..<5 {
-            if let eventResult = try? await transport.send(code: CanonOp.getEvent) {
-                for record in CanonEventRecord.parse(eventResult.payload) {
-                    if record.type == CanonEvent.olcInfoChanged { sawOLCInfo = true }
-                    if record.type == CanonEvent.propValueChanged, record.payload.count >= 8 {
-                        let propcode = record.payload.readLE(UInt32.self, at: 0)
-                        if propcode == CanonProp.focusMode || propcode == CanonProp.captureDestination {
-                            let valueBytes = record.payload.dropFirst(4).map { String(format: "%02X", $0) }.joined(separator: " ")
-                            log(String(format: "  half-press wait: prop 0x%04X = [%@]", propcode, valueBytes))
-                        }
-                        continue
-                    }
-                    log(String(format: "  half-press wait: event 0x%04X (%d bytes)", record.type, record.payload.count))
+        log("no release method produced an object event")
+        log("  ladder: \(attempts.joined(separator: " | "))")
+        _ = try? await transport.send(code: CanonOp.resetUILock)
+        throw EOSError.badResponse(operation: "triggerShutter (all methods)", code: nil)
+    }
+
+    /// The release sequences worth trying, cheapest and least invasive first.
+    private enum ShutterMethod: CaseIterable {
+        /// Legacy single-opcode release. PHASE0.md records this working.
+        case bareRelease
+        /// Full press with no half press. Correct when the body is in manual
+        /// focus: the half press exists only to run AF, and on a lens that
+        /// cannot AF it is the thing that hangs.
+        case fullPressOnly
+        /// Half press then full press — libgphoto2's reference sequence.
+        case halfThenFull
+        /// Live view fully torn down (EVFOutputDevice=0) for the duration of
+        /// the release, then restored.
+        ///
+        /// A comment in this file said this was tried and made no difference.
+        /// That test ran while the transport was discarding every data phase,
+        /// so nothing worked and it proved nothing — as does every other
+        /// "tried X, no difference" note written before 2026-08-01. Retrying
+        /// it because the one consistent correlation across all hardware runs
+        /// is CaptureDestination: Card releases fine, Host always returns
+        /// DeviceBusy. With EVFOutputDevice=cameraAndHost the body is being
+        /// asked to stream live view to the host and buffer a full-res image
+        /// for the host at the same time, which it may simply refuse.
+        case evfOffThenFull
+
+        var label: String {
+            switch self {
+            case .bareRelease: "bare RemoteRelease 0x910F"
+            case .fullPressOnly: "full press only (no AF half-press)"
+            case .halfThenFull: "half+full pair"
+            case .evfOffThenFull: "EVF off, then full press"
+            }
+        }
+    }
+
+    private struct ReleaseOutcome {
+        let fired: Bool
+        let summary: String
+    }
+
+    private func tryRelease(_ method: ShutterMethod) async -> ReleaseOutcome {
+        var note = ""
+        switch method {
+        case .bareRelease:
+            let r = try? await transport.send(code: CanonOp.remoteRelease)
+            note = code(of: r)
+
+        case .fullPressOnly:
+            // Both AF flags, since neither has been ruled out for this path.
+            for afParam: UInt32 in [1, 0] {
+                let r = try? await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, afParam])
+                note += "af\(afParam)=\(code(of: r)) "
+                _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2])
+                if await objectEventArrived() {
+                    return ReleaseOutcome(fired: true, summary: note + "-> object event")
                 }
             }
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-        log("half-press settle: OLCInfoChanged \(sawOLCInfo ? "seen" : "never seen")")
 
-        let fullPress = try await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 1])
-        if let code = fullPress.response?.code, code != PTPResponseCode.ok {
+        case .halfThenFull:
+            let half = try? await transport.send(code: CanonOp.remoteReleaseOn, parameters: [1, 0])
+            note = "half=\(code(of: half)) "
+            // Give AF a moment where a lens can actually focus.
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let full = try? await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, 1])
+            note += "full=\(code(of: full)) "
+            _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2])
             _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1])
-            halfPressReleased = true
-            log(String(format: "ReleaseOn(full) failed: 0x%04X — half-press released", code))
-            throw EOSError.badResponse(operation: "ReleaseOn(full)", code: code)
+
+        case .evfOffThenFull:
+            // EVF is restored on every exit path below, awaited rather than
+            // deferred into a detached Task. Leaving the body with EVF off
+            // kills live view for the rest of the session — the one thing
+            // currently working — and a detached restore lands at an
+            // unpredictable point, possibly after live view has already tried
+            // to resume against a dark sensor.
+            try? await setProperty(CanonProp.evfOutputDevice, 0, name: "EVFOutputDevice=off (release attempt)")
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            for afParam: UInt32 in [1, 0] {
+                let r = try? await transport.send(code: CanonOp.remoteReleaseOn, parameters: [2, afParam])
+                note += "af\(afParam)=\(code(of: r)) "
+                _ = try? await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2])
+                if await objectEventArrived() {
+                    try? await setProperty(CanonProp.evfOutputDevice, 3,
+                                           name: "EVFOutputDevice=cameraAndHost (restored)")
+                    return ReleaseOutcome(fired: true, summary: note + "-> object event")
+                }
+            }
+            try? await setProperty(CanonProp.evfOutputDevice, 3,
+                                   name: "EVFOutputDevice=cameraAndHost (restored)")
         }
 
-        try await expectOK("ReleaseOff(full)",
-            await transport.send(code: CanonOp.remoteReleaseOff, parameters: [2]))
-        try await expectOK("ReleaseOff(half)",
-            await transport.send(code: CanonOp.remoteReleaseOff, parameters: [1]))
-        halfPressReleased = true
-        log("shutter via ReleaseOn/Off half+full pair")
+        let fired = await objectEventArrived()
+        return ReleaseOutcome(fired: fired, summary: note + (fired ? "-> object event" : "-> nothing"))
+    }
+
+    private func code(of result: PTPTransactionResult?) -> String {
+        guard let c = result?.response?.code else { return "no-response" }
+        return String(format: "0x%04X", c)
+    }
+
+    /// Poll GetEvent briefly for any signal that an image now exists.
+    ///
+    /// Which event arrives depends on where the image went:
+    /// ObjectAddedEx/64 for a card capture, RequestObjectTransfer (0xC186)
+    /// for CaptureDestination=Host, where nothing is ever written to the card
+    /// and the card-object events therefore never come. Any of the three
+    /// proves the shutter released, which a response code does not.
+    private func objectEventArrived(timeout: TimeInterval = 2.0) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let result = try? await transport.send(code: CanonOp.getEvent) {
+                for record in CanonEventRecord.parse(result.payload) {
+                    switch record.type {
+                    case CanonEvent.objectAddedEx, CanonEvent.objectAddedEx64,
+                         CanonEvent.requestObjectTransfer:
+                        // Keep the handle. This poll is the only place it ever
+                        // appears — consuming the record and reporting a bare
+                        // "yes it fired" would leave the image identified by
+                        // nothing, and the download below with no way to ask
+                        // for it.
+                        if record.payload.count >= 4 {
+                            lastCapturedHandle = record.payload.readLE(UInt32.self, at: 0)
+                        }
+                        log(String(format: "  object event 0x%04X (%d bytes) handle 0x%08X",
+                                   record.type, record.payload.count, lastCapturedHandle ?? 0))
+                        return true
+                    case CanonEvent.olcInfoChanged:
+                        log("  OLCInfoChanged (focus confirm) seen")
+                    default:
+                        break
+                    }
+                }
+            }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        return false
     }
 
     // MARK: - Properties
@@ -402,10 +627,93 @@ public actor EOSCamera {
 
     // MARK: - Teardown / recovery
 
-    public func disconnect() {
+    public func disconnect() async {
+        // Hand the camera back before dropping the session. Canon properties
+        // set over PTP PERSIST after the USB connection ends — an operator who
+        // unplugs mid-session and then shoots the rest of the night on the
+        // physical shutter would otherwise be running a body we quietly
+        // reconfigured, with live view redirected and (before 2026-08-03)
+        // capture destined for a host that is no longer there.
+        //
+        // Stop the polling loops FIRST. Restoring properties underneath a live
+        // view poll running at 30fps means competing for the same session
+        // while it is being handed back.
         eventLoopTask?.cancel()
         liveViewTask?.cancel()
+        // stopLiveView() does this too — without it, any consumer of
+        // startLiveView()'s stream other than BoothViewModel (which cancels
+        // its own reader independently on every disconnect path) sits in
+        // `for await` on a stream that neither yields nor finishes.
+        liveViewContinuation?.finish()
+        liveViewContinuation = nil
+
+        // Awaited, not fired into the dark. These used to run in a detached
+        // Task while the transport was already closing, so they raced the
+        // session teardown and frequently never landed — which is how a body
+        // could still end up left on Host, the exact failure this restore
+        // exists to prevent.
+        //
+        // Bounded so a pulled cable cannot hang teardown: on the yanked-cable
+        // path every send fails fast anyway, and the whole block is best
+        // effort by design.
+        // Properties first, remote mode last — the body stops accepting
+        // property sets once it is out of remote mode, so the order is not
+        // interchangeable.
+        log("teardown: starting")
+        await bounded(seconds: 1.5) { [transport, weak self] in
+            let unlock = try? await transport.send(code: CanonOp.resetUILock)
+            await self?.log("teardown: ResetUILock -> \(Self.describe(unlock))")
+
+            var card = Data()
+            card.appendLE(UInt32(12))
+            card.appendLE(CanonProp.captureDestination)
+            card.appendLE(CanonProp.captureDestinationCard)
+            let dest = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: card)
+            await self?.log("teardown: CaptureDestination=Card -> \(Self.describe(dest))")
+
+            var evf = Data()
+            evf.appendLE(UInt32(12))
+            evf.appendLE(CanonProp.evfOutputDevice)
+            evf.appendLE(UInt32(0))
+            let off = try? await transport.send(code: CanonOp.setDevicePropValueEx, outData: evf)
+            await self?.log("teardown: EVFOutputDevice=off -> \(Self.describe(off))")
+        }
+
+        // Its own budget, deliberately. Sharing one with the restores above
+        // meant a slow property set could eat the whole allowance and this
+        // never ran — leaving the body in remote mode, showing the PC icon,
+        // and refusing to reconnect until power-cycled. Of everything in this
+        // teardown, this is the one that must not be skipped.
+        await bounded(seconds: 1.5) { [transport, weak self] in
+            let off = try? await transport.send(code: CanonOp.setRemoteMode, parameters: [0])
+            await self?.log("teardown: SetRemoteMode(0) -> \(Self.describe(off))")
+        }
+        log("teardown: done")
+
         state = .idle
+    }
+
+    /// Run `work`, giving up after `seconds`. Teardown also happens on the
+    /// yanked-cable path where every send hangs until it fails, and a booth
+    /// must not stall there.
+    /// Response code as text, or why there wasn't one. Teardown is the one
+    /// place a silent failure is invisible AND expensive: a body left in PC
+    /// mode refuses to reconnect until power-cycled, and until 2026-08-03 the
+    /// booth path never wired a log sink at all, so none of this was ever
+    /// seen.
+    nonisolated static func describe(_ result: PTPTransactionResult?) -> String {
+        guard let result else { return "send threw (transport already closed?)" }
+        guard let code = result.response?.code else { return "no response container" }
+        return String(format: "0x%04X", code)
+    }
+
+    private func bounded(seconds: Double, _ work: @escaping @Sendable () async -> Void) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await work() }
+            group.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     private func expectOK(_ operation: String, _ result: PTPTransactionResult) throws {
